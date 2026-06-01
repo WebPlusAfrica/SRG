@@ -420,7 +420,7 @@ fun SrgCarHireMainScreen(viewModel: CarHireViewModel) {
                                     enteredPasscode = it
                                     pinError = null
                                 },
-                                placeholder = { Text("Passcode (e.g. SRGADMIN)", color = Color.Gray) },
+                                placeholder = { Text("Passcode", color = Color.Gray) },
                                 visualTransformation = PasswordVisualTransformation(),
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -490,7 +490,7 @@ fun ExploreVehiclesView(viewModel: CarHireViewModel, vehicles: List<Vehicle>) {
     val uProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val selectedCarReviews by viewModel.selectedCarReviews.collectAsStateWithLifecycle()
     var selectedCategory by remember { mutableStateOf("All") }
-    val categories = listOf("All", "Supercar", "Electric Sedan", "Luxury Sports SUV", "Convertible Supercar", "Grand Sedan")
+    val categories = listOf("All", "Small cars", "Saloon cars", "High end cars", "Seven seaters", "aircraft")
     
     // Bottom detail Sheet dialog when vehicle is clicked
     var selectedDetailVehicle by remember { mutableStateOf<Vehicle?>(null) }
@@ -684,29 +684,80 @@ fun ExploreVehiclesView(viewModel: CarHireViewModel, vehicles: List<Vehicle>) {
                             }
                         }
                         
-                        // Fake visual car vector drawing/placeholder
-                        Box(
+                        // Interactive Multi-Image Gallery
+                        val allImagesList = remember(vInstance) {
+                            val list = mutableListOf<String>()
+                            if (vInstance.photoUrl.isNotBlank()) {
+                                list.add(vInstance.photoUrl)
+                            }
+                            if (vInstance.additionalPhotos.isNotBlank()) {
+                                vInstance.additionalPhotos.split(",").map { it.trim() }.forEach {
+                                    if (it.isNotBlank()) list.add(it)
+                                }
+                            }
+                            list
+                        }
+                        var activeImageIndex by remember(vInstance) { mutableStateOf(0) }
+                        val activeImage = if (allImagesList.isNotEmpty() && activeImageIndex < allImagesList.size) {
+                            allImagesList[activeImageIndex]
+                        } else {
+                            if (vInstance.photoUrl.isNotBlank()) vInstance.photoUrl else "placeholder"
+                        }
+
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(140.dp)
                                 .padding(vertical = 12.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.background),
-                            contentAlignment = Alignment.Center
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    imageVector = Icons.Default.DirectionsCar,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(60.dp)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.background),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                coil.compose.AsyncImage(
+                                    model = activeImage,
+                                    contentDescription = vInstance.title,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    placeholder = androidx.compose.ui.res.painterResource(id = android.R.drawable.ic_menu_gallery),
+                                    error = androidx.compose.ui.res.painterResource(id = android.R.drawable.ic_menu_gallery)
                                 )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    "SRG Premium Fleet Signature",
-                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                                    fontSize = 11.sp
-                                )
+                            }
+
+                            if (allImagesList.size > 1) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                androidx.compose.foundation.lazy.LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(allImagesList.size) { idx ->
+                                        val isSelected = idx == activeImageIndex
+                                        Box(
+                                            modifier = Modifier
+                                                .size(54.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                                .border(
+                                                    2.dp,
+                                                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                                                    RoundedCornerShape(8.dp)
+                                                )
+                                                .clickable { activeImageIndex = idx }
+                                        ) {
+                                            coil.compose.AsyncImage(
+                                                model = allImagesList[idx],
+                                                contentDescription = "Thumbnail $idx",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                placeholder = androidx.compose.ui.res.painterResource(id = android.R.drawable.ic_menu_gallery),
+                                                error = androidx.compose.ui.res.painterResource(id = android.R.drawable.ic_menu_gallery)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -1002,7 +1053,18 @@ fun VehicleCardItem(
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column {
+            coil.compose.AsyncImage(
+                model = vehicle.photoUrl,
+                contentDescription = vehicle.title,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                placeholder = androidx.compose.ui.res.painterResource(id = android.R.drawable.ic_menu_gallery),
+                error = androidx.compose.ui.res.painterResource(id = android.R.drawable.ic_menu_gallery)
+            )
+            Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1113,6 +1175,7 @@ fun VehicleCardItem(
             }
         }
     }
+}
 }
 
 // ----------------- SUB-VIEW: INTERACTIVE MAP -----------------
@@ -2049,6 +2112,7 @@ fun ActiveBookingsView(viewModel: CarHireViewModel, bookings: List<Booking>) {
 // ----------------- SUB-VIEW: AI CHAT SUPPORT WIDGET -----------------
 @Composable
 fun AISupportConciergeView(viewModel: CarHireViewModel) {
+    val context = LocalContext.current
     val messages by viewModel.chatMessages.collectAsStateWithLifecycle()
     val isTyping by viewModel.isAiTyping.collectAsStateWithLifecycle()
     var inputQuery by remember { mutableStateOf("") }
@@ -2081,9 +2145,17 @@ fun AISupportConciergeView(viewModel: CarHireViewModel) {
                     fontWeight = FontWeight.Black
                 )
                 Text(
-                    text = "Automated support trained exclusively on SRG car hire systems.",
-                    color = Color(0x80FFFFFF),
-                    fontSize = 11.sp
+                    text = "www.srgcarhire.co.ke",
+                    color = Color(0xFFFFC107),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
+                        try {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.srgcarhire.co.ke"))
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                        }
+                    }
                 )
             }
             IconButton(onClick = { viewModel.clearChat() }) {
@@ -2248,7 +2320,7 @@ fun UserProfileView(viewModel: CarHireViewModel, allVehicles: List<Vehicle>, all
         }
     }
     
-    val categoryOptions = listOf("All", "Supercar", "Electric Sedan", "Luxury Sports SUV", "Convertible Supercar")
+    val categoryOptions = listOf("All", "Small cars", "Saloon cars", "High end cars", "Seven seaters", "aircraft")
     
     LazyColumn(
         modifier = Modifier
@@ -2295,6 +2367,19 @@ fun UserProfileView(viewModel: CarHireViewModel, allVehicles: List<Vehicle>, all
                             text = "jeffjmwangi@gmail.com",
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                             fontSize = 11.sp
+                        )
+                        Text(
+                            text = "www.srgcarhire.co.ke",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable {
+                                try {
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.srgcarhire.co.ke"))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                }
+                            }
                         )
                         Box(
                             modifier = Modifier
@@ -2641,6 +2726,56 @@ fun UserProfileView(viewModel: CarHireViewModel, allVehicles: List<Vehicle>, all
         }
         
         item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Language,
+                            contentDescription = "Website",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Official Web Booking Portal",
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            text = "www.srgcarhire.co.ke",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable {
+                                try {
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.srgcarhire.co.ke"))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        
+        item {
             Spacer(modifier = Modifier.height(20.dp))
         }
     }
@@ -2849,16 +2984,19 @@ fun LoyaltyRewardsView(viewModel: CarHireViewModel, loyalty: LoyaltyProfile?) {
 @Composable
 fun HiddenExecutivePanelView(viewModel: CarHireViewModel, vehicles: List<Vehicle>) {
     val adminLog by viewModel.adminLog.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     
     // Create new vehicle fields
     var titleF by remember { mutableStateOf("") }
-    var categoryF by remember { mutableStateOf("Supercar") }
+    var categoryF by remember { mutableStateOf("Small cars") }
     var priceF by remember { mutableStateOf("") }
     var fuelF by remember { mutableStateOf("Electric") }
     var seatsF by remember { mutableStateOf("5") }
     var transF by remember { mutableStateOf("Automatic") }
     var descF by remember { mutableStateOf("") }
-    var locF by remember { mutableStateOf("London West") }
+    var locF by remember { mutableStateOf("Nairobi Westlands Hub") }
+    var photoUrlF by remember { mutableStateOf("") }
+    var additionalPhotosF by remember { mutableStateOf("") }
 
     LazyColumn(
         modifier = Modifier
@@ -2963,6 +3101,21 @@ fun HiddenExecutivePanelView(viewModel: CarHireViewModel, vehicles: List<Vehicle
                     ) {
                         Text("SAVE", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
+
+                    IconButton(
+                        onClick = {
+                            viewModel.adminDeleteVehicle(vehicle.id)
+                        },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .testTag("admin_delete_vehicle_${vehicle.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete fleet asset",
+                            tint = Color(0xFFFF5252)
+                        )
+                    }
                 }
             }
         }
@@ -3058,6 +3211,54 @@ fun HiddenExecutivePanelView(viewModel: CarHireViewModel, vehicles: List<Vehicle
                         modifier = Modifier.fillMaxWidth()
                     )
 
+                    OutlinedTextField(
+                        value = photoUrlF,
+                        onValueChange = { photoUrlF = it },
+                        placeholder = { Text("Primary Photo URL (Optional, or select below)", color = Color.Gray) },
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = additionalPhotosF,
+                        onValueChange = { additionalPhotosF = it },
+                        placeholder = { Text("Several Image URLs (comma-separated, or select below)", color = Color.Gray) },
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Simulated Quick Photo Preset Uploader
+                    Text("Click below to upload / auto-fill with premium high-res photos:", color = Color(0xFFFFC107), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    androidx.compose.foundation.lazy.LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        val presetGallery = listOf(
+                            Triple("Small Car", "https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&w=800&q=80", "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=800&q=80,https://images.unsplash.com/photo-1502877338535-766e1452684a?auto=format&fit=crop&w=800&q=80"),
+                            Triple("Saloon", "https://images.unsplash.com/photo-1622330248237-519e4541310d?auto=format&fit=crop&w=800&q=80", "https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=800&q=80,https://images.unsplash.com/photo-1553440569-bcc63803a83d?auto=format&fit=crop&w=800&q=80"),
+                            Triple("Supercar", "https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=800&q=80", "https://images.unsplash.com/photo-1611245801163-68f3780bf724?auto=format&fit=crop&w=800&q=80,https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=800&q=80"),
+                            Triple("Big Utility", "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&w=800&q=80", "https://images.unsplash.com/photo-1511919884226-fd3cad34687c?auto=format&fit=crop&w=800&q=80,https://images.unsplash.com/photo-1525609004556-c46c7d6cf0a3?auto=format&fit=crop&w=800&q=80"),
+                            Triple("Helicopter", "https://images.unsplash.com/photo-1540962351504-03099e0a754b?auto=format&fit=crop&w=800&q=80", "https://images.unsplash.com/photo-1494905998402-395d579af36f?auto=format&fit=crop&w=800&q=80,https://images.unsplash.com/photo-1583121274602-3e2820c69888?auto=format&fit=crop&w=800&q=80")
+                        )
+                        items(presetGallery.size) { index ->
+                            val item = presetGallery[index]
+                            AssistChip(
+                                onClick = {
+                                    photoUrlF = item.second
+                                    additionalPhotosF = item.third
+                                    Toast.makeText(context, "Preset details uploaded to edit panel!", Toast.LENGTH_SHORT).show()
+                                },
+                                label = { Text(item.first, color = Color.White, fontSize = 11.sp) },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = Color(0xFF23232A),
+                                    leadingIconContentColor = Color(0xFFFFC107)
+                                )
+                            )
+                        }
+                    }
+
                     Button(
                         onClick = {
                             val priceVal = priceF.toDoubleOrNull() ?: 100.0
@@ -3071,12 +3272,17 @@ fun HiddenExecutivePanelView(viewModel: CarHireViewModel, vehicles: List<Vehicle
                                     seats = seatsVal,
                                     trans = transF,
                                     description = descF,
-                                    location = locF
+                                    location = locF,
+                                    photoUrl = photoUrlF,
+                                    additionalPhotos = additionalPhotosF
                                 )
                                 // Blank fields
                                 titleF = ""
                                 priceF = ""
                                 descF = ""
+                                photoUrlF = ""
+                                additionalPhotosF = ""
+                                Toast.makeText(context, "Custom fleet item successfully added to active database!", Toast.LENGTH_SHORT).show()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107)),

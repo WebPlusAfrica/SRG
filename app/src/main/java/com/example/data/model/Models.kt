@@ -9,6 +9,7 @@ data class Vehicle(
     val title: String,
     val category: String, // "Luxury Sedan", "Supercar", "SUV", "Electric Coupe"
     val photoUrl: String, // image placeholder code or custom drawable
+    val additionalPhotos: String = "", // Comma-separated list of additional image URLs
     val pricePerHour: Double,
     val originalPricePerHour: Double,
     val status: String, // "Available", "Rented", "Maintenance"

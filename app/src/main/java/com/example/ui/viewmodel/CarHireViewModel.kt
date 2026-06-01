@@ -524,7 +524,9 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
         seats: Int,
         trans: String,
         description: String,
-        location: String
+        location: String,
+        photoUrl: String = "",
+        additionalPhotos: String = ""
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             val newVehicle = Vehicle(
@@ -532,10 +534,11 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
                 category = category,
                 pricePerHour = price,
                 originalPricePerHour = price,
-                photoUrl = "new_vehicle_placeholder",
+                photoUrl = photoUrl.ifBlank { "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&w=800&q=80" },
+                additionalPhotos = additionalPhotos,
                 status = "Available",
-                gpsLat = 51.5074 + (Random().nextDouble() * 0.02 - 0.01),
-                gpsLng = -0.1278 + (Random().nextDouble() * 0.02 - 0.01),
+                gpsLat = -1.2833 + (Random().nextDouble() * 0.05 - 0.025),
+                gpsLng = 36.8219 + (Random().nextDouble() * 0.05 - 0.025),
                 rating = 5.0f,
                 fuelType = fuelType,
                 seats = seats,
@@ -546,6 +549,17 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
             repository.insertVehicle(newVehicle)
             _adminLog.value = "New luxury vehicle added successfully: $title ($category)."
             addNotification("Inventory Expanded", "$title added to local fleet at $location", "warning")
+        }
+    }
+
+    fun adminDeleteVehicle(vehicleId: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val vehicle = repository.getVehicleByIdSuspend(vehicleId)
+            if (vehicle != null) {
+                repository.deleteVehicle(vehicle)
+                _adminLog.value = "Vehicle '${vehicle.title}' deleted from server database."
+                addNotification("Fleet Reduced", "'${vehicle.title}' was decommissioned from secondary active fleet lists.", "warning")
+            }
         }
     }
 }

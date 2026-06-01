@@ -23,7 +23,7 @@ import com.example.data.model.UserProfile
         LoyaltyProfile::class,
         UserProfile::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

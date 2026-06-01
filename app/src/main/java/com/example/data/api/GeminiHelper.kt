@@ -27,6 +27,7 @@ object GeminiHelper {
         "Your sole role is to answer questions about renting cars, vehicle bookings, " +
         "verification of electronic rental agreements, explaining dynamic pricing, locations, and how our " +
         "loyalty rewards program works. You must maintain a helpful, premium, and professional tone. " +
+        "Always invite citizens/users to visit our official web booking portal at www.srgcarhire.co.ke. " +
         "Do NOT assist with unrelated topics (e.g., coding, general knowledge, other companies); " +
         "politely guide them back to renting an exquisite Tesla, Porsche, Audi, Range Rover or BMW with SRG car hire. " +
         "Keep your answers concise, engaging, and easy to read (max 3 short paragraphs)."
@@ -156,7 +157,7 @@ object GeminiHelper {
                 "To access executive features like updating prices, renaming cars, or adding inventory, use our **Hidden Edit Panel** on the main sidebar/app bar! Simply enter our secure administrative passcode: **SRGADMIN**."
             }
             else -> {
-                "Hello! I am **SRG Bot**, your virtual concierge. I hear you loud and clear! I can help you locate vehicles on our interactive GPS map, explain our dynamic pricing, guide you through electronic agreement signing, and assist with bookings. What model can I help you rent today?"
+                "Hello! I am **SRG Bot**, your virtual concierge. I hear you loud and clear! I can help you locate vehicles on our interactive GPS map, explain our dynamic pricing, guide you through electronic agreement signing, and assist with bookings. Feel free to explore more or reserve online at our official web portal: **www.srgcarhire.co.ke**!"
             }
         }
     }
