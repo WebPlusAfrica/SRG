@@ -1,0 +1,6 @@
+{
+  "name": "SRG car hire",
+  "description": "SRG car hire is a premium car booking app with real-time GPS tracking, electronic agreements, flexible pricing, and integrated AI support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
