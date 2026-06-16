@@ -6,7 +6,10 @@ import com.example.data.model.Booking
 import com.example.data.model.CarReview
 import com.example.data.model.LoyaltyProfile
 import com.example.data.model.UserProfile
+import com.example.data.model.UpcomingEvent
+import com.example.data.model.CarTracker
 import kotlinx.coroutines.flow.Flow
+
 
 @Dao
 interface VehicleDao {
@@ -100,4 +103,32 @@ interface UserProfileDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertProfile(profile: UserProfile)
 }
+
+@Dao
+interface UpcomingEventDao {
+    @Query("SELECT * FROM upcoming_events ORDER BY id DESC")
+    fun getAllEvents(): Flow<List<UpcomingEvent>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEvent(event: UpcomingEvent)
+
+    @Update
+    suspend fun updateEvent(event: UpcomingEvent)
+
+    @Delete
+    suspend fun deleteEvent(event: UpcomingEvent)
+}
+
+@Dao
+interface CarTrackerDao {
+    @Query("SELECT * FROM car_trackers ORDER BY registrationNumber ASC")
+    fun getAllTrackers(): Flow<List<CarTracker>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTracker(tracker: CarTracker)
+
+    @Delete
+    suspend fun deleteTracker(tracker: CarTracker)
+}
+
 

@@ -5,11 +5,15 @@ import com.example.data.dao.BookingDao
 import com.example.data.dao.ReviewDao
 import com.example.data.dao.LoyaltyDao
 import com.example.data.dao.UserProfileDao
+import com.example.data.dao.UpcomingEventDao
+import com.example.data.dao.CarTrackerDao
 import com.example.data.model.Vehicle
 import com.example.data.model.Booking
 import com.example.data.model.CarReview
 import com.example.data.model.LoyaltyProfile
 import com.example.data.model.UserProfile
+import com.example.data.model.UpcomingEvent
+import com.example.data.model.CarTracker
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
 
@@ -18,11 +22,28 @@ class CarRepository(
     private val bookingDao: BookingDao,
     private val reviewDao: ReviewDao,
     private val loyaltyDao: LoyaltyDao,
-    private val userProfileDao: UserProfileDao
+    private val userProfileDao: UserProfileDao,
+    private val upcomingEventDao: UpcomingEventDao,
+    private val carTrackerDao: CarTrackerDao
 ) {
     val allVehicles: Flow<List<Vehicle>> = vehicleDao.getAllVehicles()
 
+    val allUpcomingEvents: Flow<List<UpcomingEvent>> = upcomingEventDao.getAllEvents()
+
+    val allTrackers: Flow<List<CarTracker>> = carTrackerDao.getAllTrackers()
+
+    suspend fun insertTracker(tracker: CarTracker) = carTrackerDao.insertTracker(tracker)
+
+    suspend fun deleteTracker(tracker: CarTracker) = carTrackerDao.deleteTracker(tracker)
+
+    suspend fun insertUpcomingEvent(event: UpcomingEvent) = upcomingEventDao.insertEvent(event)
+
+    suspend fun updateUpcomingEvent(event: UpcomingEvent) = upcomingEventDao.updateEvent(event)
+
+    suspend fun deleteUpcomingEvent(event: UpcomingEvent) = upcomingEventDao.deleteEvent(event)
+
     fun getUserProfile(email: String): Flow<UserProfile?> = userProfileDao.getProfileFlow(email)
+
     
     suspend fun getUserProfileSuspend(email: String): UserProfile? = userProfileDao.getProfileSuspend(email)
     
@@ -225,10 +246,10 @@ class CarRepository(
             loyaltyDao.insertProfile(
                 LoyaltyProfile(
                     email = "jeffjmwangi@gmail.com",
-                    pointsBalance = 250,
-                    tier = "Gold",
-                    totalBookings = 2,
-                    totalSpent = 250000.0
+                    pointsBalance = 0,
+                    tier = "Silver",
+                    totalBookings = 0,
+                    totalSpent = 0.0
                 )
             )
 
@@ -243,6 +264,72 @@ class CarRepository(
                     phoneNumber = "+254 712 345678"
                 )
             )
+
+            // Seed initial upcoming events
+            val sampleEvents = listOf(
+                UpcomingEvent(
+                    title = "Supercar Track Day Experience",
+                    description = "Take our legendary Porsche 911 GT3 RS or Tesla Model S Plaid to the regional circuit for a professional high-speed track day. Professional track instruction included.",
+                    dateText = "Saturday, July 4, 2026",
+                    location = "Tatu City Circuit",
+                    imageUrl = "https://images.unsplash.com/photo-1544829099-b9a0c07fad1a?auto=format&fit=crop&w=800&q=80"
+                ),
+                UpcomingEvent(
+                    title = "Electric Future Tech Summit",
+                    description = "A celebration of modern emissions-free performance. Explore our luxury electric fleet, receive direct battery diagnostics from charging staff, and attend exclusive panels on autonomous features.",
+                    dateText = "Saturday, July 11, 2026",
+                    location = "HQ Main Conference Hall",
+                    imageUrl = "https://images.unsplash.com/photo-1563720223185-11003d516935?auto=format&fit=crop&w=800&q=80"
+                ),
+                UpcomingEvent(
+                    title = "Helicopter Sunset Safari Tour",
+                    description = "Skip the roads entirely for an afternoon. Board our Eurocopter EC130 for scenic loops above the Rift Valley, capped off with sunset bush cocktails and VIP ground transfers.",
+                    dateText = "Sunday, July 19, 2026",
+                    location = "Wilson Airport Hangar 4",
+                    imageUrl = "https://images.unsplash.com/photo-1540962351504-03099e0a754b?auto=format&fit=crop&w=800&q=80"
+                )
+            )
+            for (event in sampleEvents) {
+                upcomingEventDao.insertEvent(event)
+            }
+
+            // Seed initial tracking registrations under current driver's phone numbers
+            val sampleTrackers = listOf(
+                CarTracker(
+                    registrationNumber = "KCG 432B",
+                    vehicleName = "Tesla Model S Plaid",
+                    driverName = "Jeff Mwangi",
+                    driverPhoneNumber = "+254 712 345678",
+                    status = "En Route",
+                    lastKnownLocation = "Westlands Premium Suites",
+                    gpsCoordinates = "-1.2580, 36.8044",
+                    speedKmh = 72
+                ),
+                CarTracker(
+                    registrationNumber = "KDH 108C",
+                    vehicleName = "Porsche 911 GT3 RS",
+                    driverName = "Alex G. (Associate)",
+                    driverPhoneNumber = "+254 755 889900",
+                    status = "Stationary",
+                    lastKnownLocation = "Karen Luxury Hills",
+                    gpsCoordinates = "-1.3200, 36.7020",
+                    speedKmh = 0
+                ),
+                CarTracker(
+                    registrationNumber = "KDK 554W",
+                    vehicleName = "Mercedes-Benz C200 Saloon",
+                    driverName = "Chloe P. (Client)",
+                    driverPhoneNumber = "+254 701 112233",
+                    status = "En Route",
+                    lastKnownLocation = "Nairobi Central CBD Hub",
+                    gpsCoordinates = "-1.2721, 36.8150",
+                    speedKmh = 45
+                )
+            )
+            for (tracker in sampleTrackers) {
+                carTrackerDao.insertTracker(tracker)
+            }
         }
     }
 }
+

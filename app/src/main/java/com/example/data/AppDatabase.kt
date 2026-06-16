@@ -9,11 +9,15 @@ import com.example.data.dao.BookingDao
 import com.example.data.dao.ReviewDao
 import com.example.data.dao.LoyaltyDao
 import com.example.data.dao.UserProfileDao
+import com.example.data.dao.UpcomingEventDao
+import com.example.data.dao.CarTrackerDao
 import com.example.data.model.Vehicle
 import com.example.data.model.Booking
 import com.example.data.model.CarReview
 import com.example.data.model.LoyaltyProfile
 import com.example.data.model.UserProfile
+import com.example.data.model.UpcomingEvent
+import com.example.data.model.CarTracker
 
 @Database(
     entities = [
@@ -21,9 +25,11 @@ import com.example.data.model.UserProfile
         Booking::class,
         CarReview::class,
         LoyaltyProfile::class,
-        UserProfile::class
+        UserProfile::class,
+        UpcomingEvent::class,
+        CarTracker::class
     ],
-    version = 2,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -32,6 +38,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun reviewDao(): ReviewDao
     abstract fun loyaltyDao(): LoyaltyDao
     abstract fun userProfileDao(): UserProfileDao
+    abstract fun upcomingEventDao(): UpcomingEventDao
+    abstract fun carTrackerDao(): CarTrackerDao
 
     companion object {
         @Volatile

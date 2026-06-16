@@ -9,6 +9,8 @@ import com.example.data.model.CarReview
 import com.example.data.model.LoyaltyProfile
 import com.example.data.model.UserProfile
 import com.example.data.model.Vehicle
+import com.example.data.model.UpcomingEvent
+import com.example.data.model.CarTracker
 import com.example.data.repository.CarRepository
 import com.example.data.api.GeminiHelper
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +27,9 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
         db.bookingDao(),
         db.reviewDao(),
         db.loyaltyDao(),
-        db.userProfileDao()
+        db.userProfileDao(),
+        db.upcomingEventDao(),
+        db.carTrackerDao()
     )
 
     // Current logged-in user email
@@ -36,14 +40,55 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
     val vehicles: StateFlow<List<Vehicle>> = repository.allVehicles
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val upcomingEvents: StateFlow<List<UpcomingEvent>> = repository.allUpcomingEvents
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val bookings: StateFlow<List<Booking>> = repository.getBookingsByEmail(currentUserEmail)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
 
     val loyaltyProfile: StateFlow<LoyaltyProfile?> = repository.getLoyaltyProfile(currentUserEmail)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val userProfile: StateFlow<UserProfile?> = repository.getUserProfile(currentUserEmail)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val carTrackers: StateFlow<List<CarTracker>> = repository.allTrackers
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun adminRegisterTracker(
+        regNo: String,
+        vName: String,
+        dName: String,
+        dPhone: String,
+        stat: String,
+        loc: String,
+        coords: String,
+        speed: Int
+    ) {
+        viewModelScope.launch {
+            val newTracker = CarTracker(
+                registrationNumber = regNo,
+                vehicleName = vName,
+                driverName = dName,
+                driverPhoneNumber = dPhone,
+                status = stat,
+                lastKnownLocation = loc,
+                gpsCoordinates = coords,
+                speedKmh = speed
+            )
+            repository.insertTracker(newTracker)
+            _adminLog.value = "Registered GPS tracker for registration: $regNo linked to $dPhone"
+            addNotification("Tracker Active", "Vehicle registration $regNo is now being tracked live under $dPhone.", "success")
+        }
+    }
+
+    fun adminDeleteTracker(tracker: CarTracker) {
+        viewModelScope.launch {
+            repository.deleteTracker(tracker)
+            _adminLog.value = "Deleted tracking registry for: ${tracker.registrationNumber}"
+        }
+    }
 
     // UI State selectors
     private val _selectedVehicleId = MutableStateFlow<Int?>(null)
@@ -58,6 +103,29 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
     // Screen navigation route holder
     private val _currentTab = MutableStateFlow("explore") // explore, map, bookings, ai_support, loyalty, admin
     val currentTab = _currentTab.asStateFlow()
+
+    // State flow to trigger a formal booking confirmation modal showing details & license agreement
+    private val _showBookingConfirmationModal = MutableStateFlow<Booking?>(null)
+    val showBookingConfirmationModal = _showBookingConfirmationModal.asStateFlow()
+
+    fun dismissBookingConfirmation() {
+        _showBookingConfirmationModal.value = null
+    }
+
+    fun triggerBookingConfirmation(booking: Booking) {
+        _showBookingConfirmationModal.value = booking
+    }
+
+    // Light/Dark Theme Preference State
+    private val themePrefs = application.getSharedPreferences("srg_theme_prefs", android.content.Context.MODE_PRIVATE)
+    private val _isDarkMode = MutableStateFlow(themePrefs.getBoolean("is_dark_mode", true))
+    val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
+
+    fun toggleTheme() {
+        val nextVal = !_isDarkMode.value
+        _isDarkMode.value = nextVal
+        themePrefs.edit().putBoolean("is_dark_mode", nextVal).apply()
+    }
 
     // Review statistics map
     private val _selectedCarReviews = MutableStateFlow<List<CarReview>>(emptyList())
@@ -205,13 +273,14 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
             val generatedId = repository.insertBooking(draft)
             val finalizedBooking = draft.copy(id = generatedId.toInt())
             _activeBookingReceipt.value = finalizedBooking
+            _showBookingConfirmationModal.value = finalizedBooking
             
             addNotification(
                 "Booking Initiated",
                 "Successfully initiated reservation for ${vehicle.title}. Please complete electronic agreement signing.",
                 "booking"
             )
-            _currentTab.value = "bookings"
+            _currentTab.value = "profile"
         }
     }
 
@@ -395,13 +464,14 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
             val generatedId = repository.insertBooking(draft)
             val finalizedBooking = draft.copy(id = generatedId.toInt())
             _activeBookingReceipt.value = finalizedBooking
+            _showBookingConfirmationModal.value = finalizedBooking
             
             addNotification(
                 "Flexible Booking Created",
                 "Successfully reserved ${vehicle.title} for a custom duration ($hours Hours) in Kenya.",
                 "booking"
             )
-            _currentTab.value = "bookings"
+            _currentTab.value = "profile"
         }
     }
 
@@ -484,9 +554,27 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
+    private val sharedPrefs = application.getSharedPreferences("srg_admin_prefs", android.content.Context.MODE_PRIVATE)
+
+    fun getAdminPasscode(): String {
+        return sharedPrefs.getString("admin_passcode", "SRGADMIN") ?: "SRGADMIN"
+    }
+
+    fun updateAdminPasscode(newPasscode: String): Boolean {
+        if (newPasscode.trim().length < 4) {
+            _adminLog.value = "Error: Passcode must be at least 4 characters long."
+            return false
+        }
+        sharedPrefs.edit().putString("admin_passcode", newPasscode.trim()).apply()
+        _adminLog.value = "Passcode changed successfully to: ${newPasscode.trim()}"
+        addNotification("Security Updated", "Administrative passcode was changed securely by admin.", "warning")
+        return true
+    }
+
     // Hidden Admin panel gate checks
     fun authorizeAdmin(passcode: String): Boolean {
-        return if (passcode.trim() == "SRGADMIN") {
+        val currentPasscode = getAdminPasscode()
+        return if (passcode.trim() == currentPasscode) {
             _isAdminAuthorized.value = true
             _adminLog.value = "System unlocked. Administrative mode: ENGAGED."
             addNotification("Executive Panel Engaged", "Welcome. Administrative permissions have been biometrically/passcode authorized.", "warning")
@@ -562,7 +650,39 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
             }
         }
     }
+
+    fun adminAddUpcomingEvent(title: String, description: String, dateText: String, location: String, imageUrl: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val event = UpcomingEvent(
+                title = title,
+                description = description,
+                dateText = dateText,
+                location = location,
+                imageUrl = imageUrl.ifBlank { "https://images.unsplash.com/photo-1544829099-b9a0c07fad1a?auto=format&fit=crop&w=800&q=80" }
+            )
+            repository.insertUpcomingEvent(event)
+            _adminLog.value = "New event published: $title."
+            addNotification("New Event Scheduled", "$title is now advertised on client carousels", "warning")
+        }
+    }
+
+    fun adminUpdateUpcomingEvent(event: UpcomingEvent) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateUpcomingEvent(event)
+            _adminLog.value = "Event updated: ${event.title}."
+            addNotification("Event Revised", "'${event.title}' scheduled details updated securely", "warning")
+        }
+    }
+
+    fun adminDeleteUpcomingEvent(event: UpcomingEvent) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteUpcomingEvent(event)
+            _adminLog.value = "Event '${event.title}' removed from publication."
+            addNotification("Event Cancelled", "Advertising for '${event.title}' has been withdrawn", "warning")
+        }
+    }
 }
+
 
 // Notification Entity Model
 data class AppNotification(

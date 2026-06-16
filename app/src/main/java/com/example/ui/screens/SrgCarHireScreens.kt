@@ -1,10 +1,17 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -39,12 +46,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import com.example.data.model.Booking
 import com.example.data.model.CarReview
 import com.example.data.model.LoyaltyProfile
 import com.example.data.model.UserProfile
 import com.example.data.model.Vehicle
+import com.example.data.model.UpcomingEvent
 import com.example.ui.viewmodel.AppNotification
+
 import com.example.ui.viewmodel.CarHireViewModel
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -64,6 +76,8 @@ fun SrgCarHireMainScreen(viewModel: CarHireViewModel) {
     val activeBookingReceipt by viewModel.activeBookingReceipt.collectAsStateWithLifecycle()
     val dynamicAlert by viewModel.dynamicPricingAlert.collectAsStateWithLifecycle()
     val isAdmin by viewModel.isAdminAuthorized.collectAsStateWithLifecycle()
+    val isDarkMode by viewModel.isDarkMode.collectAsStateWithLifecycle()
+    val showBookingConfirmationModal by viewModel.showBookingConfirmationModal.collectAsStateWithLifecycle()
 
     var showNotificationShade by remember { mutableStateOf(false) }
     var showAdminPasscodeDialog by remember { mutableStateOf(false) }
@@ -121,6 +135,17 @@ fun SrgCarHireMainScreen(viewModel: CarHireViewModel) {
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { viewModel.toggleTheme() },
+                        modifier = Modifier.testTag("theme_toggle_button")
+                    ) {
+                        Icon(
+                            imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                            contentDescription = "Theme Shift",
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
                     Box {
                         IconButton(
                             onClick = { showNotificationShade = !showNotificationShade },
@@ -159,9 +184,7 @@ fun SrgCarHireMainScreen(viewModel: CarHireViewModel) {
                 val menuItems = listOf(
                     Triple("explore", Icons.Default.AirportShuttle, "Explore"),
                     Triple("map", Icons.Default.Map, "GPS Radar"),
-                    Triple("bookings", Icons.Default.Book, "Rentals"),
                     Triple("profile", Icons.Default.Person, "Profile"),
-                    Triple("ai_support", Icons.Default.Chat, "AI Bot"),
                     Triple("loyalty", Icons.Default.Star, "Rewards")
                 )
                 
@@ -190,6 +213,28 @@ fun SrgCarHireMainScreen(viewModel: CarHireViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            // Permanent premium luxury sports car background with beautiful smooth fade-in
+            var imageLoaded by remember { mutableStateOf(false) }
+            val animatedAlpha by animateFloatAsState(
+                targetValue = if (imageLoaded) 0.18f else 0f,
+                animationSpec = tween(durationMillis = 1500, easing = EaseInOutCubic),
+                label = "PermanentCarBackgroundFade"
+            )
+
+            coil.compose.AsyncImage(
+                model = "https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1200&q=80",
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                onState = { state ->
+                    if (state is coil.compose.AsyncImagePainter.State.Success) {
+                        imageLoaded = true
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(alpha = animatedAlpha)
+            )
+
             // Main views routing
             AnimatedContent(
                 targetState = currentTab,
@@ -201,9 +246,7 @@ fun SrgCarHireMainScreen(viewModel: CarHireViewModel) {
                 when (targetTab) {
                     "explore" -> ExploreVehiclesView(viewModel, vehicles)
                     "map" -> GPSInteractiveMapView(viewModel, vehicles)
-                    "bookings" -> ActiveBookingsView(viewModel, bookings)
                     "profile" -> UserProfileView(viewModel, vehicles, bookings)
-                    "ai_support" -> AISupportConciergeView(viewModel)
                     "loyalty" -> LoyaltyRewardsView(viewModel, loyalty)
                     "admin" -> HiddenExecutivePanelView(viewModel, vehicles)
                 }
@@ -481,6 +524,14 @@ fun SrgCarHireMainScreen(viewModel: CarHireViewModel) {
             }
         }
     }
+
+    if (showBookingConfirmationModal != null) {
+        BookingConfirmationModal(
+            booking = showBookingConfirmationModal!!,
+            userProfile = userProfile,
+            onDismiss = { viewModel.dismissBookingConfirmation() }
+        )
+    }
 }
 
 // ----------------- SUB-VIEW: EXPLORE VEHICLES -----------------
@@ -488,8 +539,10 @@ fun SrgCarHireMainScreen(viewModel: CarHireViewModel) {
 @Composable
 fun ExploreVehiclesView(viewModel: CarHireViewModel, vehicles: List<Vehicle>) {
     val uProfile by viewModel.userProfile.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val selectedCarReviews by viewModel.selectedCarReviews.collectAsStateWithLifecycle()
     var selectedCategory by remember { mutableStateOf("All") }
+    var transparentCarBackground by remember { mutableStateOf(false) }
     val categories = listOf("All", "Small cars", "Saloon cars", "High end cars", "Seven seaters", "aircraft")
     
     // Bottom detail Sheet dialog when vehicle is clicked
@@ -554,15 +607,649 @@ fun ExploreVehiclesView(viewModel: CarHireViewModel, vehicles: List<Vehicle>) {
                 }
             }
 
+            // UPCOMING EVENTS ADVERTISING CAROUSEL (CLIENT PORTAL)
+            item {
+                val upcomingEvents by viewModel.upcomingEvents.collectAsStateWithLifecycle()
+                var selectedEventDetail by remember { mutableStateOf<UpcomingEvent?>(null) }
+                
+                if (upcomingEvents.isNotEmpty()) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Campaign,
+                                        contentDescription = "Upcoming Events",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Exclusive Upcoming Events",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "${upcomingEvents.size} Advertised",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(10.dp))
+                        
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(15.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("upcoming_events_carousel")
+                        ) {
+                            items(upcomingEvents) { event ->
+                                Card(
+                                    modifier = Modifier
+                                        .width(280.dp)
+                                        .height(170.dp)
+                                        .clickable { selectedEventDetail = event }
+                                        .testTag("event_card_${event.id}"),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                                ) {
+                                    Box(modifier = Modifier.fillMaxSize()) {
+                                        androidx.compose.foundation.Image(
+                                            painter = coil.compose.rememberAsyncImagePainter(
+                                                model = event.imageUrl.ifBlank { "https://images.unsplash.com/photo-1544829099-b9a0c07fad1a?auto=format&fit=crop&w=800&q=80" }
+                                            ),
+                                            contentDescription = event.title,
+                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                        
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(
+                                                    Brush.verticalGradient(
+                                                        colors = listOf(
+                                                            Color.Transparent,
+                                                            Color.Black.copy(alpha = 0.85f)
+                                                        )
+                                                    )
+                                                )
+                                        )
+                                        
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(10.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFFFFC107))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                "VIP ACCESS",
+                                                color = Color.Black,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Black
+                                            )
+                                        }
+                                        
+                                        Column(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomStart)
+                                                .padding(12.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Event,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFFFFC107),
+                                                    modifier = Modifier.size(10.dp)
+                                                )
+                                                Text(
+                                                    text = event.dateText,
+                                                    color = Color(0xFFEEEEEE),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+                                            
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            
+                                            Text(
+                                                text = event.title,
+                                                color = Color.White,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.LocationOn,
+                                                    contentDescription = null,
+                                                    tint = Color.LightGray,
+                                                    modifier = Modifier.size(10.dp)
+                                                )
+                                                Text(
+                                                    text = event.location,
+                                                    color = Color.LightGray,
+                                                    fontSize = 10.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                selectedEventDetail?.let { event ->
+                    Dialog(onDismissRequest = { selectedEventDetail = null }) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                                .testTag("event_detail_dialog_${event.id}"),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(160.dp)
+                                ) {
+                                    androidx.compose.foundation.Image(
+                                        painter = coil.compose.rememberAsyncImagePainter(
+                                            model = event.imageUrl.ifBlank { "https://images.unsplash.com/photo-1544829099-b9a0c07fad1a?auto=format&fit=crop&w=800&q=80" }
+                                        ),
+                                        contentDescription = event.title,
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))
+                                                )
+                                            )
+                                    )
+                                    Text(
+                                        text = event.title,
+                                        color = Color.White,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Black,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .padding(16.dp)
+                                    )
+                                }
+                                
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(Icons.Default.Event, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                            Text(event.dateText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                            Text(event.location, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    }
+                                    
+                                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                                    
+                                    Text(
+                                        text = event.description,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        lineHeight = 18.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = { selectedEventDetail = null },
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Close", fontSize = 12.sp)
+                                        }
+                                        Button(
+                                            onClick = {
+                                                selectedEventDetail = null
+                                                viewModel.addNotification(
+                                                    "VIP Ticket Reserved",
+                                                    "Your automatic VIP Access Pass for '${event.title}' is registered on your current member profile.",
+                                                    "info"
+                                                )
+                                                Toast.makeText(context, "VIP Pass Registered Successfully!", Toast.LENGTH_LONG).show()
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                            modifier = Modifier.weight(1f).testTag("event_reserve_ticket_button")
+                                        ) {
+                                            Text("Claim Pass", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+
+            // CAR BOOKING FORM COMPONENT WITH FIELDS FOR VEHICLE SELECTION, PICKUP DATE & RETURN DATE
+            item {
+                var bookingFormExpanded by remember { mutableStateOf(false) }
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth().testTag("car_booking_form_card"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { bookingFormExpanded = !bookingFormExpanded }
+                                .testTag("toggle_booking_form"),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DateRange,
+                                        contentDescription = "Booking Planner",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Plan Your Live Rental Journey",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Custom date ranges & custom vehicle booking",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = if (bookingFormExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = "Toggle booking form",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        
+                        AnimatedVisibility(visible = bookingFormExpanded) {
+                            Column(
+                                modifier = Modifier.padding(top = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                                
+                                // 1. VEHICLE SELECTION DROPDOWN
+                                Text(
+                                    text = "Select Premium Vehicle",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                
+                                var selectedVehicleIndex by remember { mutableStateOf(0) }
+                                val availableVehicles = vehicles.filter { it.status == "Available" }
+                                
+                                if (availableVehicles.isEmpty()) {
+                                    Text("No vehicles currently available for booking.", fontSize = 11.sp, color = Color.Red)
+                                } else {
+                                    var dropdownExpanded by remember { mutableStateOf(false) }
+                                    Box(modifier = Modifier.fillMaxWidth()) {
+                                        OutlinedButton(
+                                            onClick = { dropdownExpanded = true },
+                                            modifier = Modifier.fillMaxWidth().testTag("booking_vehicle_dropdown_button"),
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                        ) {
+                                            val currentVeh = availableVehicles.getOrNull(selectedVehicleIndex)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = currentVeh?.let { "${it.title} (${it.category}) - Ksh. ${it.pricePerHour}/hr" } ?: "Select a car...",
+                                                    fontSize = 12.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                            }
+                                        }
+                                        
+                                        DropdownMenu(
+                                            expanded = dropdownExpanded,
+                                            onDismissRequest = { dropdownExpanded = false },
+                                            modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+                                        ) {
+                                            availableVehicles.forEachIndexed { idx, veh ->
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Text(
+                                                            text = "${veh.title} (${veh.category}) - Ksh. ${veh.pricePerHour}/hr",
+                                                            fontSize = 12.sp,
+                                                            color = MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                    },
+                                                    onClick = {
+                                                        selectedVehicleIndex = idx
+                                                        dropdownExpanded = false
+                                                    },
+                                                    modifier = Modifier.testTag("booking_vehicle_option_${veh.id}")
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 2. DATE FIELDS (PICKUP & RETURN DATE)
+                                val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+                                val currentCal = Calendar.getInstance()
+                                
+                                var pickupDateText by remember { 
+                                    mutableStateOf(sdf.format(currentCal.time)) 
+                                }
+                                
+                                val returnCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+                                var returnDateText by remember { 
+                                    mutableStateOf(sdf.format(returnCal.time)) 
+                                }
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Pickup Date & Time",
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        OutlinedTextField(
+                                            value = pickupDateText,
+                                            onValueChange = { pickupDateText = it },
+                                            placeholder = { Text("YYYY-MM-DD HH:MM", fontSize = 10.sp) },
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth().testTag("booking_pickup_date_field")
+                                        )
+                                    }
+                                    
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Return Date & Time",
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        OutlinedTextField(
+                                            value = returnDateText,
+                                            onValueChange = { returnDateText = it },
+                                            placeholder = { Text("YYYY-MM-DD HH:MM", fontSize = 10.sp) },
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth().testTag("booking_return_date_field")
+                                        )
+                                    }
+                                }
+                                
+                                // Helper Preset Buttons
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    AssistChip(
+                                        onClick = {
+                                            val claimCal = Calendar.getInstance()
+                                            pickupDateText = sdf.format(claimCal.time)
+                                            claimCal.add(Calendar.HOUR, 4)
+                                            returnDateText = sdf.format(claimCal.time)
+                                        },
+                                        label = { Text("Rent 4 Hours", fontSize = 10.sp) },
+                                        modifier = Modifier.testTag("preset_rent_4h")
+                                    )
+                                    AssistChip(
+                                        onClick = {
+                                            val claimCal = Calendar.getInstance()
+                                            pickupDateText = sdf.format(claimCal.time)
+                                            claimCal.add(Calendar.DAY_OF_YEAR, 1)
+                                            returnDateText = sdf.format(claimCal.time)
+                                        },
+                                        label = { Text("Rent 1 Day", fontSize = 10.sp) },
+                                        modifier = Modifier.testTag("preset_rent_1d")
+                                    )
+                                    AssistChip(
+                                        onClick = {
+                                            val claimCal = Calendar.getInstance()
+                                            pickupDateText = sdf.format(claimCal.time)
+                                            claimCal.add(Calendar.DAY_OF_YEAR, 3)
+                                            returnDateText = sdf.format(claimCal.time)
+                                        },
+                                        label = { Text("Rent 3 Days", fontSize = 10.sp) },
+                                        modifier = Modifier.testTag("preset_rent_3d")
+                                    )
+                                }
+                                
+                                Spacer(modifier = Modifier.height(4.dp))
+                                
+                                // 3. COMPUTATION PREVIEW
+                                var calculatedHours by remember { mutableStateOf(24) }
+                                var calculatedTotalCost by remember { mutableStateOf(0.0) }
+                                var errorParseText by remember { mutableStateOf<String?>(null) }
+                                
+                                val selectedVeh = availableVehicles.getOrNull(selectedVehicleIndex)
+                                
+                                LaunchedEffect(pickupDateText, returnDateText, selectedVehicleIndex, vehicles) {
+                                    try {
+                                        val pDate = sdf.parse(pickupDateText.trim())
+                                        val rDate = sdf.parse(returnDateText.trim())
+                                        if (pDate != null && rDate != null) {
+                                            val diff = rDate.time - pDate.time
+                                            if (diff <= 0) {
+                                                errorParseText = "Return must be after pickup time."
+                                                calculatedHours = 0
+                                                calculatedTotalCost = 0.0
+                                            } else {
+                                                errorParseText = null
+                                                val hours = Math.max(1, (diff / (1000 * 60 * 60)).toInt())
+                                                calculatedHours = hours
+                                                if (selectedVeh != null) {
+                                                    calculatedTotalCost = selectedVeh.pricePerHour * hours
+                                                }
+                                            }
+                                        } else {
+                                            errorParseText = "Incorrect Date Format."
+                                        }
+                                    } catch (e: Exception) {
+                                        errorParseText = "Use format: YYYY-MM-DD HH:MM (e.g. 2026-06-15 12:00)"
+                                    }
+                                }
+                                
+                                if (errorParseText != null) {
+                                    Text(text = errorParseText!!, color = Color.Red, fontSize = 11.sp, modifier = Modifier.testTag("booking_parse_error"))
+                                } else if (selectedVeh != null) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column {
+                                                Text("RENTAL COMPUTATION SUMMARY", color = MaterialTheme.colorScheme.primary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                Text("Est. Duration: $calculatedHours Hours", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                Text("Rate: Ksh. ${selectedVeh.pricePerHour}/hr", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                                            }
+                                            Text(
+                                                text = "Ksh. ${String.format(Locale.US, "%,.2f", calculatedTotalCost)}",
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontSize = 18.sp,
+                                                fontWeight = FontWeight.Black,
+                                                modifier = Modifier.testTag("booking_calculated_price")
+                                            )
+                                        }
+                                    }
+                                }
+                                
+                                // Booking submit action
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val pDate = sdf.parse(pickupDateText.trim())
+                                            val rDate = sdf.parse(returnDateText.trim())
+                                            if (pDate != null && rDate != null && selectedVeh != null) {
+                                                viewModel.initiateFlexibleBooking(selectedVeh, pDate.time, rDate.time)
+                                                bookingFormExpanded = false
+                                                Toast.makeText(context, "Draft Rental Booked! Directing to Pre-Lease Signatures.", Toast.LENGTH_LONG).show()
+                                            }
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Invalid input. Please correct dates.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    enabled = errorParseText == null && selectedVeh != null,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth().height(48.dp).testTag("booking_initiate_button")
+                                ) {
+                                    Text("INITIATE DRAFT RENTAL", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             // Quick Horizontal Filter Row
             item {
-                Text(
-                    text = "Filter Categories",
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Filter Categories",
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.4f))
+                            .clickable { transparentCarBackground = !transparentCarBackground }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .testTag("transparent_bg_toggle")
+                    ) {
+                        Checkbox(
+                            checked = transparentCarBackground,
+                            onCheckedChange = { transparentCarBackground = it },
+                            colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Transparent BG",
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -627,7 +1314,8 @@ fun ExploreVehiclesView(viewModel: CarHireViewModel, vehicles: List<Vehicle>) {
                     onSelect = {
                         selectedDetailVehicle = vehicle
                         viewModel.selectVehicle(vehicle.id) // pull reviews
-                    }
+                    },
+                    transparentBackground = transparentCarBackground
                 )
             }
             
@@ -643,12 +1331,35 @@ fun ExploreVehiclesView(viewModel: CarHireViewModel, vehicles: List<Vehicle>) {
                 selectedDetailVehicle = null
                 viewModel.selectVehicle(null)
             }) {
+                var isEntered by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    isEntered = true
+                }
+                val scale by animateFloatAsState(
+                    targetValue = if (isEntered) 1f else 0.92f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessLow
+                    ),
+                    label = "DialogScale"
+                )
+                val alpha by animateFloatAsState(
+                    targetValue = if (isEntered) 1f else 0f,
+                    animationSpec = tween(durationMillis = 350, easing = EaseInOutCubic),
+                    label = "DialogAlpha"
+                )
+
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = 24.dp)
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            alpha = alpha
+                        )
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
                 ) {
                     Column(
@@ -1042,16 +1753,34 @@ fun VehicleCardItem(
     vehicle: Vehicle,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
-    onSelect: () -> Unit
+    onSelect: () -> Unit,
+    transparentBackground: Boolean = false
 ) {
+    var isVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(vehicle.id) {
+        isVisible = true
+    }
+    val animatedAlpha by animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0f,
+        animationSpec = tween(durationMillis = 500, easing = EaseInOutCubic),
+        label = "VehicleCardItemFade"
+    )
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer(alpha = animatedAlpha)
             .clickable { onSelect() }
             .testTag("car_card_${vehicle.id}"),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(
+            containerColor = if (transparentBackground) Color.Transparent else MaterialTheme.colorScheme.surface
+        ),
         shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        border = BorderStroke(
+            1.dp,
+            if (transparentBackground) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outline
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (transparentBackground) 0.dp else 2.dp)
     ) {
         Column {
             coil.compose.AsyncImage(
@@ -1402,13 +2131,17 @@ fun GPSInteractiveMapView(viewModel: CarHireViewModel, vehicles: List<Vehicle>) 
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
-        }
-
-        // Clicked Map Vehicle overlay preview floating sheet
+             // Clicked Map Vehicle overlay preview floating sheet
         AnimatedVisibility(
             visible = showDetailSheet != null,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            enter = slideInVertically(
+                initialOffsetY = { it / 2 },
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+            ) + fadeIn(animationSpec = tween(600, easing = EaseInOutCubic)),
+            exit = slideOutVertically(
+                targetOffsetY = { it / 2 },
+                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium)
+            ) + fadeOut(animationSpec = tween(400, easing = EaseInOutCubic)),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
@@ -1416,64 +2149,160 @@ fun GPSInteractiveMapView(viewModel: CarHireViewModel, vehicles: List<Vehicle>) 
         ) {
             showDetailSheet?.let { vItem ->
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-                    shape = RoundedCornerShape(16.dp)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)),
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+                    shape = RoundedCornerShape(20.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Beautiful vehicle active thumbnail on the map pop up
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 110.dp, height = 75.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.Black.copy(alpha = 0.2f))
+                                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            ) {
+                                coil.compose.AsyncImage(
+                                    model = vItem.photoUrl,
+                                    contentDescription = vItem.title,
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = vItem.title,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    // Status Badge on Map popup
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(
+                                                if (vItem.status == "Available") Color(0xFF00E676).copy(alpha = 0.15f)
+                                                else Color(0xFFFF5252).copy(alpha = 0.15f)
+                                            )
+                                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = vItem.status.uppercase(),
+                                            color = if (vItem.status == "Available") Color(0xFF00E676) else Color(0xFFFF5252),
+                                            fontSize = 7.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
+
+                                Text(
+                                    text = vItem.category,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFFFC107), modifier = Modifier.size(12.dp))
+                                    Text("${vItem.rating}", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("•", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f), fontSize = 11.sp)
+                                    Icon(Icons.Default.Place, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
+                                    Text(vItem.locationName, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+
+                            // Close Button for the pop up card overlay
+                            IconButton(
+                                onClick = { hoveredVehicleId = null },
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), CircleShape)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Close Popup", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(14.dp))
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Horizontally aligned mini-specs grid row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), modifier = Modifier.size(14.dp))
+                                Text(vItem.transmission, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), fontSize = 10.sp)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Default.SupportAgent, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), modifier = Modifier.size(14.dp))
+                                Text("${vItem.seats} Seats", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), fontSize = 10.sp)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Default.Bolt, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), modifier = Modifier.size(14.dp))
+                                Text(vItem.fuelType, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), fontSize = 10.sp)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
+                                Text("TOTAL PREPAID RATE", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f), fontSize = 8.sp, fontWeight = FontWeight.Bold)
                                 Text(
-                                    vItem.title,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    "Dynamic Rate: Ksh. ${String.format(Locale.US, "%,.2f", vItem.pricePerHour)}/hr",
+                                    "Ksh. ${String.format(Locale.US, "%,.2f", vItem.pricePerHour)}/hr",
                                     color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Black
                                 )
                             }
-                            IconButton(onClick = { hoveredVehicleId = null }) {
-                                Icon(Icons.Default.Close, contentDescription = "Close HUD", tint = MaterialTheme.colorScheme.onSurface)
-                            }
-                        }
-                        
-                        Text(
-                            text = "Location: ${vItem.locationName} (GPS coords: ${String.format(Locale.US, "%.5f", vItem.gpsLat)}, ${String.format(Locale.US, "%.5f", vItem.gpsLng)})",
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                            fontSize = 10.sp,
-                            modifier = Modifier.padding(vertical = 4.dp)
-                        )
 
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Button(
                                 onClick = {
-                                    viewModel.selectVehicle(vItem.id) // view full reviews/book on explore
-                                    viewModel.selectTab("explore")
+                                    viewModel.selectVehicle(vItem.id) // Select dynamically
+                                    viewModel.selectTab("explore")     // Go to booking panel
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary
                                 ),
+                                shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .height(38.dp)
                                     .testTag("map_select_detail_button")
                             ) {
-                                Text("RATING & SPECS", color = MaterialTheme.colorScheme.onPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(12.dp))
+                                    Text("BOOK NOW", color = MaterialTheme.colorScheme.onPrimary, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                                }
                             }
                         }
                     }
                 }
             }
-        }
+        }     }
     }
 }
 
@@ -1738,6 +2567,20 @@ fun ActiveBookingsView(viewModel: CarHireViewModel, bookings: List<Booking>) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("signature_field")
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        SignaturePad(
+                            modifier = Modifier.padding(vertical = 4.dp),
+                            onSignatureDrawn = { points ->
+                                if (points.size > 5) {
+                                    signField = "Signed via Signature TouchPad"
+                                }
+                            },
+                            onClear = {
+                                signField = ""
+                            }
                         )
 
                         Spacer(modifier = Modifier.height(14.dp))
@@ -2115,6 +2958,7 @@ fun AISupportConciergeView(viewModel: CarHireViewModel) {
     val context = LocalContext.current
     val messages by viewModel.chatMessages.collectAsStateWithLifecycle()
     val isTyping by viewModel.isAiTyping.collectAsStateWithLifecycle()
+    val isDarkMode by viewModel.isDarkMode.collectAsStateWithLifecycle()
     var inputQuery by remember { mutableStateOf("") }
     
     val listState = rememberScrollState()
@@ -2124,48 +2968,127 @@ fun AISupportConciergeView(viewModel: CarHireViewModel) {
         "Show me sports cars",
         "How is dynamic price computed?",
         "Where is the Porsche GT3 RS?",
-        "Tell me about the loyalty program"
+        "Tell me about the loyalty program",
+        "Explain digital agreements"
     )
+
+    // Check if real API Key is injected
+    val hasRealApiKey = com.example.BuildConfig.GEMINI_API_KEY.isNotBlank() && 
+                        com.example.BuildConfig.GEMINI_API_KEY != "MY_GEMINI_API_KEY" &&
+                        com.example.BuildConfig.GEMINI_API_KEY != "null"
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
+        // Concierge Header Panel
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text(
-                    text = "SRG Bot AI Representative",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Black
-                )
-                Text(
-                    text = "www.srgcarhire.co.ke",
-                    color = Color(0xFFFFC107),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable {
-                        try {
-                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.srgcarhire.co.ke"))
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                        }
-                    }
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SmartToy,
+                        contentDescription = "AI Bot Logo",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = "SRG Bot AI Concierge",
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text(
+                        text = "Real-time rental expert representative",
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                        fontSize = 11.sp
+                    )
+                }
             }
-            IconButton(onClick = { viewModel.clearChat() }) {
-                Icon(Icons.Default.Refresh, contentDescription = "Clear Chat", tint = Color.LightGray)
+            
+            OutlinedButton(
+                onClick = { viewModel.clearChat() },
+                modifier = Modifier.height(36.dp).testTag("clear_chat_button"),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = "Reset Chat", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("RESET", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
         }
         
-        Divider(color = Color(0x1AFFFFFF), modifier = Modifier.padding(vertical = 12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Chat Bubble Area scrollable
+        // DYNAMIC CONNECTION STATUS INDICATION (Replaces hardcoded warning banner)
+        val statusBg = if (hasRealApiKey) Color(0x154CAF50) else Color(0x15FF9800)
+        val statusBorder = if (hasRealApiKey) Color(0x404CAF50) else Color(0x40FF9800)
+        val statusText = if (hasRealApiKey) "GEMINI ENGINE: ACTIVE" else "LOCAL OFFLINE ASSISTANT: BACKUP ACTIVE"
+        val statusDesc = if (hasRealApiKey) 
+            "Connected securely to Google central servers via gemini-3.5-flash." 
+            else "Using local backup intelligence because the central API key is offline. High-speed predictions are active!"
+        val statusIcon = if (hasRealApiKey) Icons.Default.CloudQueue else Icons.Default.OfflineBolt
+        val statusColor = if (hasRealApiKey) Color(0xFF4CAF50) else Color(0xFFFFB74D)
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = statusBg),
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, statusBorder),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = statusIcon,
+                    contentDescription = "Status icon",
+                    tint = statusColor,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(statusColor)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = statusText,
+                            color = statusColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                    Text(
+                        text = statusDesc,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+        }
+
+        // Chat Bubble Scrollable Area
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -2173,25 +3096,30 @@ fun AISupportConciergeView(viewModel: CarHireViewModel) {
                 .verticalScroll(listState)
         ) {
             messages.forEach { (text, isUser) ->
-                ChatBubble(text, isUser)
-                Spacer(modifier = Modifier.height(10.dp))
+                ChatBubble(text = text, isUser = isUser)
+                Spacer(modifier = Modifier.height(12.dp))
             }
             
             if (isTyping) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(8.dp),
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(8.dp)
+                            .size(6.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primary)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("SRG Bot is writing guides...", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "SRG Assistant is formulating expert advice...",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
             
@@ -2203,44 +3131,58 @@ fun AISupportConciergeView(viewModel: CarHireViewModel) {
             }
         }
 
-        // Suggestions Horizontal Slider
+        // Suggestions Slider
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(vertical = 8.dp)
+            modifier = Modifier.padding(vertical = 12.dp)
         ) {
             items(suggestions) { keyword ->
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
+                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
                         .clickable { viewModel.sendSupportPrompt(keyword) }
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
                 ) {
-                    Text(keyword, color = MaterialTheme.colorScheme.onSurface, fontSize = 10.sp)
+                    Text(
+                        text = keyword,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
 
-        // Search Prompt Input box
+        // Search Prompt Input Area
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .imePadding(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedTextField(
                 value = inputQuery,
                 onValueChange = { inputQuery = it },
-                placeholder = { Text("Ask about fleet, GPS coordinates, agreements...", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f), fontSize = 12.sp) },
+                placeholder = { 
+                    Text(
+                        "Ask about fleets, prices, locations, or agreements...", 
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f), 
+                        fontSize = 11.sp
+                    ) 
+                },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
                     focusedTextColor = MaterialTheme.colorScheme.onBackground,
-                    unfocusedTextColor = MaterialTheme.colorScheme.onBackground
+                    unfocusedTextColor = MaterialTheme.colorScheme.onBackground,
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
                 ),
                 singleLine = true,
+                shape = RoundedCornerShape(24.dp),
                 modifier = Modifier
                     .weight(1f)
                     .testTag("ai_input_field")
@@ -2253,11 +3195,17 @@ fun AISupportConciergeView(viewModel: CarHireViewModel) {
                     }
                 },
                 modifier = Modifier
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary)
                     .testTag("submit_ai_button")
             ) {
-                Icon(Icons.Filled.Send, contentDescription = "Submit support query", tint = MaterialTheme.colorScheme.onPrimary)
+                Icon(
+                    imageVector = Icons.Filled.Send,
+                    contentDescription = "Submit support query",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
@@ -2266,30 +3214,76 @@ fun AISupportConciergeView(viewModel: CarHireViewModel) {
 @Composable
 fun ChatBubble(text: String, isUser: Boolean) {
     val align = if (isUser) Alignment.End else Alignment.Start
-    val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
-    val textColors = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-    
-    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = align) {
-        Box(
-            modifier = Modifier
-                .clip(
-                    RoundedCornerShape(
-                        topStart = 14.dp,
-                        topEnd = 14.dp,
-                        bottomStart = if (isUser) 14.dp else 2.dp,
-                        bottomEnd = if (isUser) 2.dp else 14.dp
-                    )
-                )
-                .background(bubbleColor)
-                .padding(12.dp)
-                .widthIn(max = 280.dp)
+    val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val textColors = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    val bubbleBorder = if (isUser) BorderStroke(0.dp, Color.Transparent) else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = align
+    ) {
+        Row(
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text(
-                text = text,
-                color = textColors,
-                fontSize = 12.sp,
-                lineHeight = 16.sp
-            )
+            if (!isUser) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.secondary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SmartToy,
+                        contentDescription = "Bot",
+                        tint = MaterialTheme.colorScheme.onSecondary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            
+            Card(
+                colors = CardDefaults.cardColors(containerColor = bubbleColor),
+                shape = RoundedCornerShape(
+                    topStart = 16.dp,
+                    topEnd = 16.dp,
+                    bottomStart = if (isUser) 16.dp else 4.dp,
+                    bottomEnd = if (isUser) 4.dp else 16.dp
+                ),
+                border = bubbleBorder,
+                modifier = Modifier.widthIn(max = 280.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = text,
+                        color = textColors,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        fontWeight = if (isUser) FontWeight.Medium else FontWeight.Normal
+                    )
+                }
+            }
+            
+            if (isUser) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "User",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -2298,8 +3292,24 @@ fun ChatBubble(text: String, isUser: Boolean) {
 @Composable
 fun UserProfileView(viewModel: CarHireViewModel, allVehicles: List<Vehicle>, allBookings: List<Booking>) {
     val profileState by viewModel.userProfile.collectAsStateWithLifecycle()
+    val activeReceipt by viewModel.activeBookingReceipt.collectAsStateWithLifecycle()
     val context = LocalContext.current
     
+    // Multi stage booking variables
+    var showSignaturePanel by remember { mutableStateOf(false) }
+    var showSecurePaymentPanel by remember { mutableStateOf(false) }
+    
+    // Secure billing fields
+    var licenseField by remember { mutableStateOf("") }
+    var signField by remember { mutableStateOf("") }
+    var cardField by remember { mutableStateOf("") }
+    var expiryField by remember { mutableStateOf("") }
+    var cvvField by remember { mutableStateOf("") }
+    
+    var selectedPaymentMethod by remember { mutableStateOf("Credit Card") }
+    var mpesaPhoneNumber by remember { mutableStateOf("") }
+    var agreementAccepted by remember { mutableStateOf(false) }
+
     // Editable state fields
     var fullNameVal by remember { mutableStateOf("Jeff J. Mwangi") }
     var licenseVal by remember { mutableStateOf("DL-99482X-NBO") }
@@ -2316,6 +3326,11 @@ fun UserProfileView(viewModel: CarHireViewModel, allVehicles: List<Vehicle>, all
             licenseVal = it.driverLicense.ifBlank { "DL-99482X-NBO" }
             preferredCatVal = it.preferredVehicleCategory.ifBlank { "All" }
             phoneVal = it.phoneNumber.ifBlank { "0712345678" }
+            
+            // Set fields for checkout flow
+            licenseField = it.driverLicense
+            mpesaPhoneNumber = it.phoneNumber
+            
             hasInitialized = true
         }
     }
@@ -2400,6 +3415,525 @@ fun UserProfileView(viewModel: CarHireViewModel, allVehicles: List<Vehicle>, all
             }
         }
         
+        // ACTIVE OUTSTANDING RENTAL ENGINE HUB
+        if (activeReceipt != null) {
+            val booking = activeReceipt!!
+            
+            item {
+                Text(
+                    text = "Active Ride Control & Verification",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 15.sp,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+            
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("OUTSTANDING FILE RESERVATION", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                                Text(booking.vehicleTitle, color = MaterialTheme.colorScheme.onSurface, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            }
+                            
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = booking.status.uppercase(),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Duration Chosen:", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp)
+                            Text("${booking.durationHours} Hours", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Rental Charge:", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp)
+                            Text("Ksh. ${String.format(Locale.US, "%,.2f", booking.totalSpent)} total", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // SUBUNIT: STEPS CHECK LIST
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (booking.isVerified) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                contentDescription = null,
+                                tint = if (booking.isVerified) Color(0xFF00E676) else MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("1. Digital Agreement Signed & License Verified", color = if (booking.isVerified) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (booking.paymentStatus == "Paid") Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                contentDescription = null,
+                                tint = if (booking.paymentStatus == "Paid") Color(0xFF00E676) else MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("2. Secure Central Stripe Payment Secured", color = if (booking.paymentStatus == "Paid") MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Trigger Panels based on outstanding tasks
+                        if (!booking.isVerified) {
+                            Button(
+                                onClick = { showSignaturePanel = true },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("trigger_signature_button")
+                            ) {
+                                Text("SIGN PRE-LEASE AGREEMENT", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                        } else if (booking.paymentStatus == "Unpaid") {
+                            Button(
+                                onClick = { showSecurePaymentPanel = true },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("trigger_payment_button")
+                            ) {
+                                Text("PROCESS SECURED PAYMENT GATEWAY", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                        } else {
+                            // Confirmed ride controls
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Button(
+                                    onClick = { viewModel.completeRide(booking.id, booking.vehicleId) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("return_car_button")
+                                ) {
+                                    Text("RETURN VEHICLE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // SIGNATURE DISCOVERY PANEL
+        if (showSignaturePanel && activeReceipt != null) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("SRG Automated Digital Verification", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(110.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.background)
+                                .verticalScroll(rememberScrollState())
+                                .padding(10.dp)
+                        ) {
+                            Text(
+                                "SRG LEGAL TERMS CONDITIONS (KENYA):\n" +
+                                "1. Maximum vehicle speed limits: Driver strictly recognizes responsibility for speed cameras and highways in Nairobi Kenya.\n" +
+                                "2. Nairobi Expressway and Tolls: Motorist is liable for all Expressway tolls (payable via M-Pesa or Cash) and parking fees incurred.\n" +
+                                "3. GPS Tracking and Immobilizer: The vehicle contains automated satellite-linked GPS. The motor is unlocked dynamically upon payment approval and is monitored. Unauthorized cross-border driving of rental cars is forbidden.",
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                                fontSize = 9.sp,
+                                lineHeight = 12.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = agreementAccepted,
+                                onCheckedChange = { agreementAccepted = it },
+                                colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                            )
+                            Text("I agree to all SRG leasing terms.", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        OutlinedTextField(
+                            value = licenseField,
+                            onValueChange = { licenseField = it },
+                            placeholder = { Text("Driving License Number (e.g. LN123456)", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onBackground
+                            ),
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("license_field")
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedTextField(
+                            value = signField,
+                            onValueChange = { signField = it },
+                            placeholder = { Text("Electronic Initials Signature", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onBackground
+                            ),
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("signature_field")
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        SignaturePad(
+                            modifier = Modifier.padding(vertical = 4.dp),
+                            onSignatureDrawn = { points ->
+                                if (points.size > 5) {
+                                    signField = "Signed via Signature TouchPad"
+                                }
+                            },
+                            onClear = {
+                                signField = ""
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                        
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { showSignaturePanel = false },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Discard", color = MaterialTheme.colorScheme.onSurface)
+                            }
+                            Button(
+                                onClick = {
+                                    if (licenseField.isNotBlank() && signField.isNotBlank() && agreementAccepted) {
+                                        activeReceipt?.let {
+                                            viewModel.submitAgreementVerification(it.id, licenseField, signField)
+                                        }
+                                        android.widget.Toast.makeText(context, "License and signature saved to phone!", android.widget.Toast.LENGTH_SHORT).show()
+                                        showSignaturePanel = false
+                                        showSecurePaymentPanel = true // Auto proceed to keep checkout flow flawless!
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                enabled = licenseField.isNotBlank() && signField.isNotBlank() && agreementAccepted,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("confirm_signature_button")
+                            ) {
+                                Text("VERIFY NOW", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // SECURED PAYMENT PANEL
+        if (showSecurePaymentPanel && activeReceipt != null) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Secure Gateway Checkout", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("SECURE CO.", color = MaterialTheme.colorScheme.primary, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(14.dp))
+                        
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(42.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.background)
+                                .padding(2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            val modes = listOf("Credit Card", "M-Pesa", "Cash")
+                            modes.forEach { m ->
+                                val active = selectedPaymentMethod == m
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                        .clickable { selectedPaymentMethod = m }
+                                        .wrapContentSize(Alignment.Center)
+                                        .testTag("pay_mode_$m")
+                                ) {
+                                    Text(
+                                        text = m,
+                                        color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(14.dp))
+                        
+                        if (selectedPaymentMethod == "Credit Card") {
+                            OutlinedTextField(
+                                value = cardField,
+                                onValueChange = { cardField = it },
+                                placeholder = { Text("Card Number (16 Digits)", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                                    unfocusedTextColor = MaterialTheme.colorScheme.onBackground
+                                ),
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("card_number_field")
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = expiryField,
+                                    onValueChange = { expiryField = it },
+                                    placeholder = { Text("MM/YY", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)) },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                        focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                                        unfocusedTextColor = MaterialTheme.colorScheme.onBackground
+                                    ),
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("card_expiry_field")
+                                )
+                                OutlinedTextField(
+                                    value = cvvField,
+                                    onValueChange = { cvvField = it },
+                                    placeholder = { Text("CVV", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)) },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                        focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                                        unfocusedTextColor = MaterialTheme.colorScheme.onBackground
+                                    ),
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("card_cvv_field")
+                                )
+                            }
+                        } else if (selectedPaymentMethod == "M-Pesa") {
+                            Text(
+                                "LIPA NA M-PESA INSTANT",
+                                color = Color(0xFF00E676),
+                                fontWeight = FontWeight.Black,
+                                fontSize = 11.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Enter your Safaricom mobile phone line below. A secure STK Push Prompt PIN request will pop up on your handset screen to approve Ksh payment instantly.",
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            OutlinedTextField(
+                                value = mpesaPhoneNumber,
+                                onValueChange = { mpesaPhoneNumber = it },
+                                label = { Text("M-Pesa Mobile Number", fontSize = 11.sp) },
+                                placeholder = { Text("E.g. 07XXXXXXXX", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                                    unfocusedTextColor = MaterialTheme.colorScheme.onBackground
+                                ),
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("mpesa_phone_field")
+                            )
+                        } else {
+                            Text(
+                                "PAY BY CASH HANDOVER",
+                                color = Color(0xFFFFC107),
+                                fontWeight = FontWeight.Black,
+                                fontSize = 11.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Pay cash directly to our fleet delivery driver on delivery coordinates. Confirm your coordinate phone contact below so our agent can call you to organize drop-off. Support Hotline: +254 712 345 678.",
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            OutlinedTextField(
+                                value = mpesaPhoneNumber,
+                                onValueChange = { mpesaPhoneNumber = it },
+                                label = { Text("Contact Phone Line for Dispatch Coordinate", fontSize = 11.sp) },
+                                placeholder = { Text("E.g. 07XXXXXXXX", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                                    unfocusedTextColor = MaterialTheme.colorScheme.onBackground
+                                ),
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("cash_phone_field")
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        activeReceipt?.let {
+                            Text(
+                                "AMOUNT TO DEBIT: Ksh. ${String.format(Locale.US, "%,.2f", it.totalSpent)}",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { showSecurePaymentPanel = false },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
+                            }
+                            
+                            val inputIsValid = when (selectedPaymentMethod) {
+                                "Credit Card" -> cardField.length >= 12 && expiryField.isNotBlank() && cvvField.length >= 3
+                                "M-Pesa" -> mpesaPhoneNumber.length >= 9
+                                "Cash" -> mpesaPhoneNumber.length >= 9
+                                else -> false
+                            }
+                            
+                            Button(
+                                onClick = {
+                                    if (inputIsValid) {
+                                        activeReceipt?.let {
+                                            if (selectedPaymentMethod == "Credit Card") {
+                                                viewModel.processSecurePayment(it.id, cardField, expiryField, cvvField)
+                                            } else {
+                                                viewModel.processAlternativePayment(it.id, selectedPaymentMethod, mpesaPhoneNumber)
+                                            }
+                                        }
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            if (selectedPaymentMethod == "M-Pesa") "Lipa Na M-Pesa STK push check sent to phone!" else "Secure premium credit card validated and paid to database!",
+                                            android.widget.Toast.LENGTH_LONG
+                                        ).show()
+                                        showSecurePaymentPanel = false
+                                        cardField = ""
+                                        expiryField = ""
+                                        cvvField = ""
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                enabled = inputIsValid,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("confirm_payment_button")
+                            ) {
+                                val buttonLabel = when (selectedPaymentMethod) {
+                                    "Credit Card" -> "DEBIT APPROVED"
+                                    "M-Pesa" -> "LIPA NA MPESA"
+                                    "Cash" -> "CONFIRM CASH"
+                                    else -> "DEBIT APPROVED"
+                                }
+                                Text(buttonLabel, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // SECURE VAULT INFORMATION BLOCK
         item {
             Text(
@@ -2998,6 +4532,42 @@ fun HiddenExecutivePanelView(viewModel: CarHireViewModel, vehicles: List<Vehicle
     var photoUrlF by remember { mutableStateOf("") }
     var additionalPhotosF by remember { mutableStateOf("") }
 
+    // Admin state for changing password
+    var tempNewPasscode by remember { mutableStateOf("") }
+
+    // State parameters for tracking registrations
+    val trackers by viewModel.carTrackers.collectAsStateWithLifecycle(initialValue = emptyList())
+    var trackerRegNum by remember { mutableStateOf("") }
+    var trackerCarName by remember { mutableStateOf("") }
+    var trackerDriverName by remember { mutableStateOf("") }
+    var trackerDriverPhone by remember { mutableStateOf("") }
+    var trackerStatus by remember { mutableStateOf("En Route") }
+    var trackerLoc by remember { mutableStateOf("Nairobi Westlands Hub") }
+    var trackerCoords by remember { mutableStateOf("-1.2580, 36.8044") }
+    var trackerSpeed by remember { mutableStateOf("60") }
+
+    // Image Picker from Gallery contract
+    val singlePhotoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri ->
+            if (uri != null) {
+                photoUrlF = uri.toString()
+                Toast.makeText(context, "Selected photo from device gallery!", Toast.LENGTH_SHORT).show()
+            }
+        }
+    )
+
+    // Multiple Images Picker from Gallery contract
+    val multiplePhotosPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(),
+        onResult = { uris ->
+            if (uris.isNotEmpty()) {
+                additionalPhotosF = uris.joinToString(",") { it.toString() }
+                Toast.makeText(context, "Selected ${uris.size} photos from device gallery!", Toast.LENGTH_SHORT).show()
+            }
+        }
+    )
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -3030,6 +4600,61 @@ fun HiddenExecutivePanelView(viewModel: CarHireViewModel, vehicles: List<Vehicle
             Divider(color = Color(0x33FFFFFF), modifier = Modifier.padding(vertical = 12.dp))
         }
 
+        // Change Administrative Passcode Section
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF131316)),
+                border = BorderStroke(1.dp, Color(0x33FFFFFF)),
+                modifier = Modifier.fillMaxWidth().testTag("admin_change_password_card")
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Change Administrative Passcode",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = tempNewPasscode,
+                            onValueChange = { tempNewPasscode = it },
+                            placeholder = { Text("New passcode", color = Color.Gray) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFFFFC107)
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("admin_new_passcode_field")
+                        )
+                        Button(
+                            onClick = {
+                                if (tempNewPasscode.isNotBlank()) {
+                                    if (viewModel.updateAdminPasscode(tempNewPasscode)) {
+                                        Toast.makeText(context, "Passcode updated successfully!", Toast.LENGTH_SHORT).show()
+                                        tempNewPasscode = ""
+                                    } else {
+                                        Toast.makeText(context, "Failed to update passcode.", Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Passcode cannot be blank.", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107)),
+                            modifier = Modifier.testTag("admin_change_passcode_submit")
+                        ) {
+                            Text("Update", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
         if (adminLog != null) {
             item {
                 Card(
@@ -3043,6 +4668,403 @@ fun HiddenExecutivePanelView(viewModel: CarHireViewModel, vehicles: List<Vehicle
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(12.dp)
                     )
+                }
+            }
+        }
+
+        // --- GPS VEHICLE TRACKER & ACTIVE REGISTRY ENGINE ---
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF131316)),
+                border = BorderStroke(1.dp, Color(0xFFFFC107)),
+                modifier = Modifier.fillMaxWidth().testTag("admin_tracking_registry_card")
+            ) {
+                var showAddTrackerPanel by remember { mutableStateOf(false) }
+
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showAddTrackerPanel = !showAddTrackerPanel }
+                            .testTag("admin_toggle_tracker_panel"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.DirectionsCar,
+                                contentDescription = null,
+                                tint = Color(0xFFFFC107),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "GPS Tracker & Active Driver Registry",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${trackers.size} active vehicles under tracking agents",
+                                    color = Color.Gray,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = if (showAddTrackerPanel) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Toggle tracker form",
+                            tint = Color.LightGray
+                        )
+                    }
+
+                    if (showAddTrackerPanel) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Divider(color = Color(0x1DFFFFFF))
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Text(
+                            text = "Register Transit Vehicle Tracker",
+                            color = Color(0xFFFFC107),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedTextField(
+                            value = trackerRegNum,
+                            onValueChange = { trackerRegNum = it },
+                            placeholder = { Text("Registration Plate (e.g. KCG 432B)", color = Color.Gray, fontSize = 11.sp) },
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("tracker_reg_input")
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = trackerCarName,
+                                onValueChange = { trackerCarName = it },
+                                placeholder = { Text("Car name (e.g. Tesla Model S)", color = Color.Gray, fontSize = 11.sp) },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).testTag("tracker_car_input")
+                            )
+
+                            OutlinedTextField(
+                                value = trackerDriverName,
+                                onValueChange = { trackerDriverName = it },
+                                placeholder = { Text("Driver Name (e.g. Jeff)", color = Color.Gray, fontSize = 11.sp) },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).testTag("tracker_driver_input")
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        val cleanPhone = trackerDriverPhone.trim().replace("\\s".toRegex(), "")
+                        val isPhoneValid = cleanPhone.isEmpty() || cleanPhone.matches("^(?:\\+254|254|0)?([71]\\d{8})$".toRegex())
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = trackerDriverPhone,
+                                onValueChange = { trackerDriverPhone = it },
+                                placeholder = { Text("Driver's Phone (e.g. +254 712...)", color = Color.Gray, fontSize = 11.sp) },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                singleLine = true,
+                                isError = !isPhoneValid,
+                                modifier = Modifier.weight(1.2f).testTag("tracker_phone_input")
+                            )
+
+                            OutlinedTextField(
+                                value = trackerSpeed,
+                                onValueChange = { trackerSpeed = it },
+                                placeholder = { Text("Speed (km/h)", color = Color.Gray, fontSize = 11.sp) },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(0.8f).testTag("tracker_speed_input")
+                            )
+                        }
+
+                        if (!isPhoneValid) {
+                            Text(
+                                text = "Invalid Kenya phone number format (must match e.g. 07XXXXXXXX or +2547XXXXXXXX)",
+                                color = Color(0xFFEF5350),
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = trackerLoc,
+                                onValueChange = { trackerLoc = it },
+                                placeholder = { Text("Current Hub Location", color = Color.Gray, fontSize = 11.sp) },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).testTag("tracker_location_input")
+                            )
+
+                            OutlinedTextField(
+                                value = trackerCoords,
+                                onValueChange = { trackerCoords = it },
+                                placeholder = { Text("GPS Lat, Lng", color = Color.Gray, fontSize = 11.sp) },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).testTag("tracker_coords_input")
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Status select pills
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Driver Status:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            val statuses = listOf("En Route", "Stationary", "Completed")
+                            statuses.forEach { s ->
+                                val selected = trackerStatus == s
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (selected) Color(0xFFFFC107) else Color(0xFF23232A))
+                                        .clickable { trackerStatus = s }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                        .testTag("tracker_status_pill_$s")
+                                ) {
+                                    Text(
+                                        text = s,
+                                        color = if (selected) Color.Black else Color.LightGray,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Button(
+                            onClick = {
+                                val phoneTrimmed = trackerDriverPhone.trim().replace("\\s".toRegex(), "")
+                                val validated = phoneTrimmed.matches("^(?:\\+254|254|0)?([71]\\d{8})$".toRegex())
+
+                                if (trackerRegNum.isNotBlank() && trackerCarName.isNotBlank() && trackerDriverPhone.isNotBlank()) {
+                                    if (!validated) {
+                                        Toast.makeText(context, "ERROR: Phone number must match Kenyan format (07... or +254...)", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        val spd = trackerSpeed.toIntOrNull() ?: 50
+                                        val formattedPhone = if (phoneTrimmed.startsWith("+254")) {
+                                            phoneTrimmed
+                                        } else if (phoneTrimmed.startsWith("254")) {
+                                            "+$phoneTrimmed"
+                                        } else if (phoneTrimmed.startsWith("0")) {
+                                            "+254" + phoneTrimmed.substring(1)
+                                        } else {
+                                            "+254$phoneTrimmed"
+                                        }
+
+                                        viewModel.adminRegisterTracker(
+                                            regNo = trackerRegNum.uppercase().trim(),
+                                            vName = trackerCarName,
+                                            dName = trackerDriverName,
+                                            dPhone = formattedPhone,
+                                            stat = trackerStatus,
+                                            loc = trackerLoc,
+                                            coords = trackerCoords,
+                                            speed = spd
+                                        )
+                                        // Reset fields
+                                        trackerRegNum = ""
+                                        trackerCarName = ""
+                                        trackerDriverName = ""
+                                        trackerDriverPhone = ""
+                                        trackerLoc = "Nairobi Westlands Hub"
+                                        trackerCoords = "-1.2580, 36.8044"
+                                        trackerSpeed = "60"
+                                        Toast.makeText(context, "Registered new transit tracker successfully!", Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Please configure Plate Number, Vehicle and Driver's phone!", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .testTag("submit_tracker_button")
+                        ) {
+                            Icon(Icons.Default.Upload, contentDescription = null, tint = Color.Black)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("ACTIVATE LIVE GPS TRACKER", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Divider(color = Color(0x19FFFFFF))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Live Active Trackers Registry Directory",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (trackers.isEmpty()) {
+                        Text(
+                            text = "No active tracker systems deployed inside Nairobi central map.",
+                            color = Color.Gray,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            trackers.forEach { tracker ->
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1B20)),
+                                    border = BorderStroke(1.dp, Color(0x1AFFFFFF)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                // Authentic reflective license plate style badge
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(3.dp))
+                                                        .background(Color(0xFFFFF176))
+                                                        .border(0.5.dp, Color.Black)
+                                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text(
+                                                        text = tracker.registrationNumber,
+                                                        color = Color.Black,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        letterSpacing = 0.5.sp
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = tracker.vehicleName,
+                                                    color = Color.White,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+
+                                            // Direct Dialer Action + De-registration Action Buttons
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                IconButton(
+                                                    onClick = {
+                                                        try {
+                                                            val intent = android.content.Intent(
+                                                                android.content.Intent.ACTION_DIAL,
+                                                                android.net.Uri.parse("tel:${tracker.driverPhoneNumber}")
+                                                            )
+                                                            context.startActivity(intent)
+                                                        } catch (e: Exception) {
+                                                            Toast.makeText(context, "Dialer unavailable: ${tracker.driverPhoneNumber}", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(28.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.PhoneInTalk,
+                                                        contentDescription = "Call driver",
+                                                        tint = Color(0xFFFFC107),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                IconButton(
+                                                    onClick = {
+                                                        viewModel.adminDeleteTracker(tracker)
+                                                    },
+                                                    modifier = Modifier.size(28.dp).testTag("delete_tracker_${tracker.registrationNumber}")
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Remove tracker",
+                                                        tint = Color(0xFFFF5252),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(10.dp))
+
+                                        // Driver info + details
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column {
+                                                Text(
+                                                    text = "Driver: ${tracker.driverName}",
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                                Text(
+                                                    text = "Phone: ${tracker.driverPhoneNumber}",
+                                                    color = Color.LightGray,
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    val statusLamp = if (tracker.status == "En Route") Color(0xFF4CAF50) else Color(0xFF9E9E9E)
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(6.dp)
+                                                            .clip(CircleShape)
+                                                            .background(statusLamp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = tracker.status.uppercase(),
+                                                        color = if (tracker.status == "En Route") Color(0xFF81C784) else Color.LightGray,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                                Text(
+                                                    text = "${tracker.speedKmh} km/h • ${tracker.lastKnownLocation}",
+                                                    color = Color.Gray,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = "GPS Coordinates: ${tracker.gpsCoordinates}",
+                                            color = Color.DarkGray,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3211,23 +5233,63 @@ fun HiddenExecutivePanelView(viewModel: CarHireViewModel, vehicles: List<Vehicle
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    OutlinedTextField(
-                        value = photoUrlF,
-                        onValueChange = { photoUrlF = it },
-                        placeholder = { Text("Primary Photo URL (Optional, or select below)", color = Color.Gray) },
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = photoUrlF,
+                            onValueChange = { photoUrlF = it },
+                            placeholder = { Text("Primary Photo URL (Optional)", color = Color.Gray, fontSize = 11.sp) },
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("admin_photo_url_field")
+                        )
+                        Button(
+                            onClick = {
+                                singlePhotoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF23232A)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.height(56.dp).testTag("admin_upload_image_button")
+                        ) {
+                            Icon(Icons.Default.Upload, contentDescription = "Upload from phone", tint = Color(0xFFFFC107))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Phone", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
 
-                    OutlinedTextField(
-                        value = additionalPhotosF,
-                        onValueChange = { additionalPhotosF = it },
-                        placeholder = { Text("Several Image URLs (comma-separated, or select below)", color = Color.Gray) },
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = additionalPhotosF,
+                            onValueChange = { additionalPhotosF = it },
+                            placeholder = { Text("Several Image URLs (comma-separated)", color = Color.Gray, fontSize = 11.sp) },
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("admin_additional_photos_field")
+                        )
+                        Button(
+                            onClick = {
+                                multiplePhotosPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF23232A)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.height(56.dp).testTag("admin_upload_multiple_images_button")
+                        ) {
+                            Icon(Icons.Default.Upload, contentDescription = "Upload multiple", tint = Color(0xFFFFC107))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Multiple", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
 
                     // Simulated Quick Photo Preset Uploader
                     Text("Click below to upload / auto-fill with premium high-res photos:", color = Color(0xFFFFC107), fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -3297,8 +5359,878 @@ fun HiddenExecutivePanelView(viewModel: CarHireViewModel, vehicles: List<Vehicle
             }
         }
         
+        // SECTION: UPCOMING ADVERTISED EVENTS MANAGEMENT
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF131316)),
+                border = BorderStroke(1.dp, Color(0x33FFFFFF)),
+                modifier = Modifier.fillMaxWidth().testTag("admin_events_manager_card")
+            ) {
+                var showAddEventPanel by remember { mutableStateOf(false) }
+                
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showAddEventPanel = !showAddEventPanel }
+                            .testTag("admin_toggle_events_manager"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Campaign, contentDescription = null, tint = Color(0xFFFFC107), modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Manage Advertising Events",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                        Icon(
+                            imageVector = if (showAddEventPanel) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = Color(0xFFFFC107)
+                        )
+                    }
+                    
+                    AnimatedVisibility(visible = showAddEventPanel) {
+                        Column(
+                            modifier = Modifier.padding(top = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            var evTitle by remember { mutableStateOf("") }
+                            var evDesc by remember { mutableStateOf("") }
+                            var evDate by remember { mutableStateOf("") }
+                            var evLocation by remember { mutableStateOf("") }
+                            var evImage by remember { mutableStateOf("") }
+                            
+                            Text("PUBLISH NEW ADVERTISING EVENT", color = Color(0xFFFFC107), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            
+                            OutlinedTextField(
+                                value = evTitle,
+                                onValueChange = { evTitle = it },
+                                label = { Text("Event Title") },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedLabelColor = Color(0xFFFFC107),
+                                    unfocusedLabelColor = Color.Gray,
+                                    focusedBorderColor = Color(0xFFFFC107)
+                                ),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("admin_event_title_input")
+                            )
+                            
+                            OutlinedTextField(
+                                value = evDate,
+                                onValueChange = { evDate = it },
+                                label = { Text("Event Date Range") },
+                                placeholder = { Text("e.g. Saturday, July 4, 2026", color = Color.Gray) },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedLabelColor = Color(0xFFFFC107),
+                                    unfocusedLabelColor = Color.Gray,
+                                    focusedBorderColor = Color(0xFFFFC107)
+                                ),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("admin_event_date_input")
+                            )
+                            
+                            OutlinedTextField(
+                                value = evLocation,
+                                onValueChange = { evLocation = it },
+                                label = { Text("Location") },
+                                placeholder = { Text("e.g. Wilson Airport Hangar 4", color = Color.Gray) },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedLabelColor = Color(0xFFFFC107),
+                                    unfocusedLabelColor = Color.Gray,
+                                    focusedBorderColor = Color(0xFFFFC107)
+                                ),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("admin_event_location_input")
+                            )
+                            
+                            OutlinedTextField(
+                                value = evImage,
+                                onValueChange = { evImage = it },
+                                label = { Text("Header Image URL") },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedLabelColor = Color(0xFFFFC107),
+                                    unfocusedLabelColor = Color.Gray,
+                                    focusedBorderColor = Color(0xFFFFC107)
+                                ),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("admin_event_image_input")
+                            )
+                            
+                            OutlinedTextField(
+                                value = evDesc,
+                                onValueChange = { evDesc = it },
+                                label = { Text("Event Description") },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedLabelColor = Color(0xFFFFC107),
+                                    unfocusedLabelColor = Color.Gray,
+                                    focusedBorderColor = Color(0xFFFFC107)
+                                ),
+                                modifier = Modifier.fillMaxWidth().testTag("admin_event_desc_input")
+                            )
+                            
+                            Button(
+                                onClick = {
+                                    if (evTitle.isNotBlank() && evDate.isNotBlank() && evLocation.isNotBlank() && evDesc.isNotBlank()) {
+                                        viewModel.adminAddUpcomingEvent(
+                                            title = evTitle,
+                                            description = evDesc,
+                                            dateText = evDate,
+                                            location = evLocation,
+                                            imageUrl = evImage
+                                        )
+                                        evTitle = ""
+                                        evDesc = ""
+                                        evDate = ""
+                                        evLocation = ""
+                                        evImage = ""
+                                        Toast.makeText(context, "Upcoming event scheduled and published!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Fill in all mandatory fields (Title, Date, Location, Desc)", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107)),
+                                modifier = Modifier.fillMaxWidth().testTag("admin_event_submit_button")
+                            ) {
+                                Text("PUBLISH ADVERTISING EVENT", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                            
+                            Divider(color = Color(0x22FFFFFF), modifier = Modifier.padding(vertical = 8.dp))
+                            
+                            val upcomingEvents by viewModel.upcomingEvents.collectAsStateWithLifecycle()
+                            
+                            Text("CURRENT ADVERTISED EVENTS (${upcomingEvents.size})", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            
+                            if (upcomingEvents.isEmpty()) {
+                                Text("No events scheduled.", color = Color.Gray, fontSize = 11.sp)
+                            } else {
+                                upcomingEvents.forEach { event ->
+                                    var isEditing by remember { mutableStateOf(false) }
+                                    var editTitle by remember { mutableStateOf(event.title) }
+                                    var editDate by remember { mutableStateOf(event.dateText) }
+                                    var editLocation by remember { mutableStateOf(event.location) }
+                                    var editDesc by remember { mutableStateOf(event.description) }
+                                    
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1F1F24)),
+                                        border = BorderStroke(1.dp, Color(0x19FFFFFF)),
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            if (isEditing) {
+                                                OutlinedTextField(
+                                                    value = editTitle,
+                                                    onValueChange = { editTitle = it },
+                                                    label = { Text("Title") },
+                                                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFFFFC107)),
+                                                    singleLine = true,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                )
+                                                OutlinedTextField(
+                                                    value = editDate,
+                                                    onValueChange = { editDate = it },
+                                                    label = { Text("Date") },
+                                                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFFFFC107)),
+                                                    singleLine = true,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                )
+                                                OutlinedTextField(
+                                                    value = editLocation,
+                                                    onValueChange = { editLocation = it },
+                                                    label = { Text("Location") },
+                                                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFFFFC107)),
+                                                    singleLine = true,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                )
+                                                OutlinedTextField(
+                                                    value = editDesc,
+                                                    onValueChange = { editDesc = it },
+                                                    label = { Text("Description") },
+                                                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFFFFC107)),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                )
+                                                
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    OutlinedButton(
+                                                        onClick = { isEditing = false },
+                                                        modifier = Modifier.weight(1f)
+                                                    ) {
+                                                        Text("Cancel", color = Color.White, fontSize = 11.sp)
+                                                    }
+                                                    Button(
+                                                        onClick = {
+                                                            val updatedEvent = event.copy(
+                                                                title = editTitle,
+                                                                dateText = editDate,
+                                                                location = editLocation,
+                                                                description = editDesc
+                                                            )
+                                                            viewModel.adminUpdateUpcomingEvent(updatedEvent)
+                                                            isEditing = false
+                                                            Toast.makeText(context, "Event updated!", Toast.LENGTH_SHORT).show()
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107)),
+                                                        modifier = Modifier.weight(1f).testTag("admin_event_save_${event.id}")
+                                                    ) {
+                                                        Text("Save", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            } else {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(event.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                                        Text(event.dateText, color = Color(0xFFFFC107), fontSize = 10.sp)
+                                                        Text(event.location, color = Color.Gray, fontSize = 10.sp)
+                                                    }
+                                                    Row(
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        IconButton(
+                                                            onClick = { isEditing = true },
+                                                            modifier = Modifier.size(32.dp).testTag("admin_event_edit_${event.id}")
+                                                        ) {
+                                                            Icon(Icons.Default.Edit, contentDescription = "Edit event", tint = Color.White, modifier = Modifier.size(16.dp))
+                                                        }
+                                                        IconButton(
+                                                            onClick = {
+                                                                viewModel.adminDeleteUpcomingEvent(event)
+                                                                Toast.makeText(context, "Deleted event advertising card", Toast.LENGTH_SHORT).show()
+                                                            },
+                                                            modifier = Modifier.size(32.dp).testTag("admin_event_delete_${event.id}")
+                                                        ) {
+                                                            Icon(Icons.Default.Delete, contentDescription = "Delete event", tint = Color.Red, modifier = Modifier.size(16.dp))
+                                                        }
+                                                    }
+                                                }
+                                                Text(event.description, color = Color.LightGray, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             Spacer(modifier = Modifier.height(30.dp))
         }
+
     }
 }
+
+@Composable
+fun SignaturePad(
+    modifier: Modifier = Modifier,
+    onSignatureDrawn: (List<androidx.compose.ui.geometry.Offset>) -> Unit,
+    onClear: () -> Unit
+) {
+    val points = remember { mutableStateListOf<androidx.compose.ui.geometry.Offset>() }
+    
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Touch Digital Signature Pad:",
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp
+            )
+            Text(
+                text = "Reset Pad",
+                color = MaterialTheme.colorScheme.error,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable {
+                        points.clear()
+                        onClear()
+                    }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+        
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(130.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.background)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            points.add(offset)
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            val newPoint = points.lastOrNull()?.let { it + dragAmount } ?: change.position
+                            points.add(newPoint)
+                            onSignatureDrawn(points)
+                        }
+                    )
+                }
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                if (points.size > 1) {
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                        val first = points.first()
+                        moveTo(first.x, first.y)
+                        for (i in 1 until points.size) {
+                            val p = points[i]
+                            lineTo(p.x, p.y)
+                        }
+                    }
+                    drawPath(
+                        path = path,
+                        color = Color(0xFF00E676),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                            width = 6f,
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                            join = androidx.compose.ui.graphics.StrokeJoin.Round
+                        )
+                    )
+                } else if (points.isEmpty()) {
+                    // Draw centered watermark guideline
+                    drawContext.canvas.nativeCanvas.apply {
+                        val paint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.GRAY
+                            alpha = 100
+                            textSize = 34f
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            isAntiAlias = true
+                        }
+                        drawText("DRAW YOUR SIGNATURE HERE", size.width / 2f, size.height / 2f + 12f, paint)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ----------------- BOOKING CONFIRMATION MODAL & SYSTEM PASS DISPATCH SYSTEM -----------------
+@Composable
+fun BookingConfirmationModal(
+    booking: Booking,
+    userProfile: UserProfile?,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val sdf = remember { SimpleDateFormat("MMM d, yyyy HH:mm", Locale.US) }
+    
+    // Stateful simulations for SMS dispatch
+    var smsState by remember { mutableStateOf("Idle") } // Idle, Formatting, Encrypting, Sending, Sent
+    val scope = rememberCoroutineScope()
+    
+    Dialog(onDismissRequest = { onDismiss() }) {
+        Card(
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp)
+                .border(
+                    BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                    RoundedCornerShape(24.dp)
+                ),
+            elevation = CardDefaults.cardElevation(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Header Ring
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Confirmation Status Verified",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(14.dp))
+                
+                Text(
+                    text = "RESERVATION SECURED",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
+                )
+                
+                Text(
+                    text = "REF ID: #SRG-${booking.id}",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    letterSpacing = 0.5.sp,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Invoice Summary Box
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "RENTAL RECEIPT SUMMARY",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 0.5.sp
+                        )
+                        
+                        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                        
+                        // Row: Vehicle Model
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.DirectionsCar,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Vehicle", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(
+                                text = booking.vehicleTitle,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Row: Category
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Category,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Class", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(
+                                text = booking.vehicleCategory,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Row: Rental Duration
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Duration", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(
+                                text = "${booking.durationHours} Hours",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Row: Dates / Times
+                        val startMs = if (booking.pickupTime > 0) booking.pickupTime else booking.bookedAt
+                        val endMs = if (booking.returnTime > 0) booking.returnTime else startMs + (booking.durationHours * 3600 * 1000L)
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.DateRange,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Pickup", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(
+                                text = sdf.format(Date(startMs)),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Event,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Return Target", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(
+                                text = sdf.format(Date(endMs)),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+
+                        // Row: Billing Sum
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "TOTAL ESTIMATED BILLING",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Black),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Ksh. ${String.format(Locale.US, "%,.2f", booking.totalSpent)}",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.testTag("modal_confirmed_cost")
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Interactive Digital Copy of Agreement Scroll Pane
+                Text(
+                    text = "DIGITAL LEASE & COVENANT DEED",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    letterSpacing = 0.5.sp,
+                    modifier = Modifier.align(Alignment.Start)
+                )
+                
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                        .padding(10.dp)
+                ) {
+                    val scrollState = rememberScrollState()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scrollState),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "SRG EXECS GENERAL COVENANT AGREEMENT (Ver 4.10)",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        
+                        Text(
+                            text = "1. BINDING RENTAL LEASE:\nBy confirming this reservation, Lessee accepts that all terms under the SRG Executive Fleet Services apply. The vehicle ID ${booking.vehicleId} registered under SRG records is legally assigned.",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                        )
+                        Text(
+                            text = "2. DIGITAL DRIVER COMPLIANCE:\nLessee warrants that they hold a valid unexpired driving permit. If not previously uploaded, digital signing and validation are mandatory before active remote unlocking of GPS telemetry will be completed.",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                        )
+                        Text(
+                            text = "3. HIGHWAY SPEED LIMITS & SAFETY:\nFor safety and corporate policy, a speed limit ceiling of 110 km/h is enforced. Breaching telemetry thresholds flags automated notifications to HQ and local controllers.",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                        )
+                        Text(
+                            text = "4. GPS GEOLOCKING BOUNDS:\nThe vehicle contains integrated GPS Radar. Venturing past designated borders or pre-declared routes without support clearance will activate active remote engine containment locks.",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                        )
+                        Text(
+                            text = "5. ASSET SANITATION & RETURN:\nLessee agrees to return the asset in similar hygienic parameters. Re-fueling or recharging to a minimum of 30% baseline is requested. Failure might invite restoration surcharges.",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                        )
+                        
+                        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 4.dp))
+                        
+                        Text(
+                            text = "SIGNED DIGITALLY VIA:\nEmail: ${booking.userEmail}\nDate: ${sdf.format(Date(booking.bookedAt))}\nDevice Verification: SRG-SECURE-ID-${booking.id}",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.secondary,
+                            lineHeight = 11.sp
+                        )
+                    }
+                    
+                    // Small scroll guide gradient fading block
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(18.dp)
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, MaterialTheme.colorScheme.surface.copy(alpha = 0.62f))
+                                )
+                            )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Active channels dispatch buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Action 1: Local System Notification Pass
+                    Button(
+                        onClick = {
+                            triggerSystemNotification(context, booking)
+                            Toast.makeText(context, "Real system notification pass posted!", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("btn_get_notification")
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NotificationsActive,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Bell Pass", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Action 2: Digital copy delivery via stateful SMS simulation
+                    Button(
+                        onClick = {
+                            if (smsState == "Idle") {
+                                scope.launch {
+                                    smsState = "Formatting"
+                                    kotlinx.coroutines.delay(800)
+                                    smsState = "Encrypting"
+                                    kotlinx.coroutines.delay(1000)
+                                    smsState = "Sending"
+                                    kotlinx.coroutines.delay(1200)
+                                    smsState = "Sent"
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (smsState == "Sent") Color(0xFF2E7D32) else MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = if (smsState == "Sent") Color.White else MaterialTheme.colorScheme.onPrimaryContainer
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("btn_get_sms")
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = when (smsState) {
+                                    "Sent" -> Icons.Default.Check
+                                    "Idle" -> Icons.Default.Sms
+                                    else -> Icons.Default.Sync
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = when (smsState) {
+                                    "Idle" -> "Send SMS"
+                                    "Formatting" -> "Formatting..."
+                                    "Encrypting" -> "Encrypting..."
+                                    "Sending" -> "Sending..."
+                                    "Sent" -> "SMS Delivered!"
+                                    else -> "Processing..."
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                if (smsState != "Idle") {
+                    Text(
+                        text = when (smsState) {
+                            "Formatting" -> "Formatting compact lease details for cellular transmission..."
+                            "Encrypting" -> "Signing agreement payload with SHA-256 digital signature..."
+                            "Sending" -> "Dispatched package via Telco gateway to ${userProfile?.phoneNumber ?: "+254 712 345678"}..."
+                            "Sent" -> "Message successfully processed and acknowledged by cellular networks!"
+                            else -> ""
+                        },
+                        fontSize = 9.sp,
+                        color = if (smsState == "Sent") Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .fillMaxWidth()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Done / Dismiss Bottom Main action
+                Button(
+                    onClick = { onDismiss() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("btn_close_confirmation")
+                ) {
+                    Text(
+                        "DISMISS AGREEMENT & PROCEED",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 12.sp,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+fun triggerSystemNotification(context: Context, booking: Booking) {
+    val channelId = "srg_rentals_notification_channel"
+    val channelName = "SRG Car Hire"
+    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val importance = NotificationManager.IMPORTANCE_HIGH
+        val channel = NotificationChannel(channelId, channelName, importance).apply {
+            description = "SRG Booking and Digital Lease Agreement verification notices"
+        }
+        notificationManager.createNotificationChannel(channel)
+    }
+    
+    val formattedCost = String.format(Locale.US, "%,.2f", booking.totalSpent)
+    val builder = NotificationCompat.Builder(context, channelId)
+        .setSmallIcon(android.R.drawable.ic_dialog_info)
+        .setContentTitle("SRG Lease Secured: ${booking.vehicleTitle}")
+        .setContentText("Booking #SRG-${booking.id} verified. Rate: Ksh. ${booking.pricePerHourAtBooking}/hr. Est: Ksh. $formattedCost.")
+        .setStyle(NotificationCompat.BigTextStyle().bigText(
+            "Booking confirmation receipt and digital agreement pass successfully generated for ${booking.vehicleTitle}.\n" +
+            "Ref ID: #SRG-${booking.id}\n" +
+            "Duration: ${booking.durationHours} Hours\n" +
+            "Verification level: Digital Signature Approved\n" +
+            "Total Billing: Ksh. $formattedCost"
+        ))
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setAutoCancel(true)
+        
+    try {
+        notificationManager.notify(booking.id, builder.build())
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+

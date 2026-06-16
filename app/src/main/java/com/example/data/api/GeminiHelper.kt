@@ -26,10 +26,11 @@ object GeminiHelper {
         "You are 'SRG Bot', the expert virtual AI assistant exclusively for 'SRG car hire'. " +
         "Your sole role is to answer questions about renting cars, vehicle bookings, " +
         "verification of electronic rental agreements, explaining dynamic pricing, locations, and how our " +
-        "loyalty rewards program works. You must maintain a helpful, premium, and professional tone. " +
+        "loyalty rewards program works. You also have high-tech vehicle/driver tracking integration " +
+        "allowing administrators to track any transit vehicle in real-time using the current driver's phone number " +
+        "or registration plate from our Live Active Trackers Registry! Maintain a premium and professional tone. " +
         "Always invite citizens/users to visit our official web booking portal at www.srgcarhire.co.ke. " +
-        "Do NOT assist with unrelated topics (e.g., coding, general knowledge, other companies); " +
-        "politely guide them back to renting an exquisite Tesla, Porsche, Audi, Range Rover or BMW with SRG car hire. " +
+        "Do NOT assist with unrelated topics (e.g., coding, general knowledge); politely guide them back to SRG car hire. " +
         "Keep your answers concise, engaging, and easy to read (max 3 short paragraphs)."
 
     suspend fun getChatResponse(prompt: String, chatHistory: List<Pair<String, Boolean>>): String = withContext(Dispatchers.IO) {
@@ -146,6 +147,9 @@ object GeminiHelper {
             }
             query.contains("map") || query.contains("gps") || query.contains("where") || query.contains("nearby") || query.contains("locate") -> {
                 "You can see nearby cars in real-time on our **interactive map**. The map shows live positions of vehicles (with real-time GPS tracking simulation). You can tap any vehicle icon to select it, check its rating, view dynamic prices, and lock in your reservation."
+            }
+            query.contains("track") || query.contains("phone") || query.contains("driver") || query.contains("locate driver") || query.contains("gps coordinates") -> {
+                "Our vehicles are monitored in real-time. In the **Hidden Edit Panel**, administrators can register and supervise state-of-the-art live transits. Deployed trackers show custom license plates, the current driver's name, speed stats, and their registered **phone numbers** featuring direct phone-call shortcuts. This guarantees optimal security on long-distance transits!"
             }
             query.contains("verification") || query.contains("verify") || query.contains("agreement") || query.contains("sign") || query.contains("license") -> {
                 "To ensure maximum safety, SRG car hire incorporates **Automated Digital Verification**. When you book, you'll be shown our digital rental agreement. Simply enter your driving license number, sign with your initials/signature, and our automated backend verifies the documents instantly so you can drive!"

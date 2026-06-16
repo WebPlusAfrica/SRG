@@ -72,3 +72,26 @@ data class UserProfile(
     val favoriteVehicleIds: String = "", // comma-separated vehicle IDs
     val phoneNumber: String = "+254 712 345678"
 )
+
+@Entity(tableName = "upcoming_events")
+data class UpcomingEvent(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val title: String,
+    val description: String,
+    val dateText: String,
+    val location: String = "Nairobi Corporate HQ",
+    val imageUrl: String = ""
+)
+
+@Entity(tableName = "car_trackers")
+data class CarTracker(
+    @PrimaryKey val registrationNumber: String,
+    val vehicleName: String,
+    val driverName: String,
+    val driverPhoneNumber: String,
+    val status: String, // "En Route", "Stationary", "Completed"
+    val lastKnownLocation: String,
+    val gpsCoordinates: String, // e.g., "-1.2833, 36.8219"
+    val speedKmh: Int = 0
+)
+
