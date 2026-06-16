@@ -81,6 +81,7 @@ fun SrgCarHireMainScreen(viewModel: CarHireViewModel) {
 
     var showNotificationShade by remember { mutableStateOf(false) }
     var showAdminPasscodeDialog by remember { mutableStateOf(false) }
+    var showMpesaSimulator by remember { mutableStateOf(false) }
     
     // Auto Show dynamic price alerts on screen as standard elegant floating HUD
     Scaffold(
@@ -411,6 +412,17 @@ fun SrgCarHireMainScreen(viewModel: CarHireViewModel) {
                         Text(text = "Close Shade", color = Color.White)
                     }
                 }
+            }
+
+            if (showMpesaSimulator && activeBookingReceipt != null) {
+                MpesaStkPushSimulatorDialog(
+                    booking = activeBookingReceipt!!,
+                    onDismiss = { showMpesaSimulator = false },
+                    onPaymentSuccess = {
+                        viewModel.confirmMpesaPayment(activeBookingReceipt!!.id)
+                        showMpesaSimulator = false
+                    }
+                )
             }
 
             // Gated Administrative panel trigger passcode Dialog
@@ -2316,6 +2328,7 @@ fun ActiveBookingsView(viewModel: CarHireViewModel, bookings: List<Booking>) {
     // Multi stage booking variables
     var showSignaturePanel by remember { mutableStateOf(false) }
     var showSecurePaymentPanel by remember { mutableStateOf(false) }
+    var showMpesaSimulator by remember { mutableStateOf(false) }
     
     // Secure billing fields
     var licenseField by remember { mutableStateOf("") }
@@ -2430,13 +2443,17 @@ fun ActiveBookingsView(viewModel: CarHireViewModel, bookings: List<Booking>) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = if (booking.paymentStatus == "Paid") Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                imageVector = if (booking.paymentStatus == "Paid") Icons.Default.CheckCircle else if (booking.paymentStatus == "Pending") Icons.Default.Pending else Icons.Default.RadioButtonUnchecked,
                                 contentDescription = null,
-                                tint = if (booking.paymentStatus == "Paid") Color(0xFF00E676) else MaterialTheme.colorScheme.outline,
+                                tint = if (booking.paymentStatus == "Paid") Color(0xFF00E676) else if (booking.paymentStatus == "Pending") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("2. Secure Central Stripe Payment Secured", color = if (booking.paymentStatus == "Paid") MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
+                            Text(
+                                text = if (booking.paymentStatus == "Paid") "2. Secure M-Pesa / Card Payment Confirmed" else if (booking.paymentStatus == "Pending") "2. Lipa Na M-Pesa STK Push Pending PIN" else "2. Secure Card / M-Pesa Payment Required",
+                                color = if (booking.paymentStatus == "Paid" || booking.paymentStatus == "Pending") MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                fontSize = 12.sp
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -2467,6 +2484,85 @@ fun ActiveBookingsView(viewModel: CarHireViewModel, bookings: List<Booking>) {
                                     .testTag("trigger_payment_button")
                             ) {
                                 Text("PROCESS SECURED PAYMENT GATEWAY", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                        } else if (booking.paymentStatus == "Pending") {
+                            Card(
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                                ),
+                                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            "STK PUSH DISPATCHED",
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            letterSpacing = 0.5.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        "A secure Safaricom PIN request was sent to your phone. Payment is only confirmed when you complete PIN entry on your handset.",
+                                        fontSize = 10.sp,
+                                        lineHeight = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = { viewModel.confirmMpesaPayment(booking.id) },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = Color(0xFF2E7D32),
+                                                contentColor = Color.White
+                                            ),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier
+                                                .weight(1.1f)
+                                                .height(36.dp)
+                                                .testTag("verify_mpesa_button")
+                                        ) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.Center,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("I Have Paid", fontSize = 10.sp, fontWeight = FontWeight.Black)
+                                            }
+                                        }
+                                        OutlinedButton(
+                                            onClick = { showMpesaSimulator = true },
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier
+                                                .weight(0.9f)
+                                                .height(36.dp)
+                                                .testTag("open_mpesa_prompt_button")
+                                        ) {
+                                            Text("Simulate PIN", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
                             }
                         } else {
                             // Confirmed ride controls
@@ -3298,6 +3394,7 @@ fun UserProfileView(viewModel: CarHireViewModel, allVehicles: List<Vehicle>, all
     // Multi stage booking variables
     var showSignaturePanel by remember { mutableStateOf(false) }
     var showSecurePaymentPanel by remember { mutableStateOf(false) }
+    var showMpesaSimulator by remember { mutableStateOf(false) }
     
     // Secure billing fields
     var licenseField by remember { mutableStateOf("") }
@@ -3495,13 +3592,17 @@ fun UserProfileView(viewModel: CarHireViewModel, allVehicles: List<Vehicle>, all
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = if (booking.paymentStatus == "Paid") Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                imageVector = if (booking.paymentStatus == "Paid") Icons.Default.CheckCircle else if (booking.paymentStatus == "Pending") Icons.Default.Pending else Icons.Default.RadioButtonUnchecked,
                                 contentDescription = null,
-                                tint = if (booking.paymentStatus == "Paid") Color(0xFF00E676) else MaterialTheme.colorScheme.outline,
+                                tint = if (booking.paymentStatus == "Paid") Color(0xFF00E676) else if (booking.paymentStatus == "Pending") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("2. Secure Central Stripe Payment Secured", color = if (booking.paymentStatus == "Paid") MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
+                            Text(
+                                text = if (booking.paymentStatus == "Paid") "2. Secure M-Pesa / Card Payment Confirmed" else if (booking.paymentStatus == "Pending") "2. Lipa Na M-Pesa STK Push Pending PIN" else "2. Secure Card / M-Pesa Payment Required",
+                                color = if (booking.paymentStatus == "Paid" || booking.paymentStatus == "Pending") MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                fontSize = 12.sp
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -3532,6 +3633,85 @@ fun UserProfileView(viewModel: CarHireViewModel, allVehicles: List<Vehicle>, all
                                     .testTag("trigger_payment_button")
                             ) {
                                 Text("PROCESS SECURED PAYMENT GATEWAY", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                        } else if (booking.paymentStatus == "Pending") {
+                            Card(
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                                ),
+                                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            "STK PUSH DISPATCHED",
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            letterSpacing = 0.5.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        "A secure Safaricom PIN request was sent to your phone. Payment is only confirmed when you complete PIN entry on your handset.",
+                                        fontSize = 10.sp,
+                                        lineHeight = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = { viewModel.confirmMpesaPayment(booking.id) },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = Color(0xFF2E7D32),
+                                                contentColor = Color.White
+                                            ),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier
+                                                .weight(1.1f)
+                                                .height(36.dp)
+                                                .testTag("verify_mpesa_button")
+                                        ) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.Center,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("I Have Paid", fontSize = 10.sp, fontWeight = FontWeight.Black)
+                                            }
+                                        }
+                                        OutlinedButton(
+                                            onClick = { showMpesaSimulator = true },
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier
+                                                .weight(0.9f)
+                                                .height(36.dp)
+                                                .testTag("open_mpesa_prompt_button")
+                                        ) {
+                                            Text("Simulate PIN", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
                             }
                         } else {
                             // Confirmed ride controls
@@ -6231,6 +6411,186 @@ fun triggerSystemNotification(context: Context, booking: Booking) {
         notificationManager.notify(booking.id, builder.build())
     } catch (e: Exception) {
         e.printStackTrace()
+    }
+}
+
+// ----------------- SAFARICOM M-PESA STK PUSH SIMULATOR DIALOG -----------------
+@Composable
+fun MpesaStkPushSimulatorDialog(
+    booking: Booking,
+    onDismiss: () -> Unit,
+    onPaymentSuccess: () -> Unit
+) {
+    var pinValue by remember { mutableStateOf("") }
+    var processingState by remember { mutableStateOf("Input") } // Input, Validating, Success
+    val formattedCost = remember(booking.totalSpent) { String.format(Locale.US, "%,.2f", booking.totalSpent) }
+    
+    Dialog(onDismissRequest = { onDismiss() }) {
+        Card(
+            shape = RoundedCornerShape(8.dp), // classic boxy SIM toolkit corner
+            colors = CardDefaults.cardColors(
+                containerColor = Color(0xFFECEFF1) // retro gray-white background
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .border(BorderStroke(1.dp, Color.Gray.copy(alpha = 0.5f)), RoundedCornerShape(8.dp)),
+            elevation = CardDefaults.cardElevation(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Classic Safaricom Sim Toolkit dark title bar
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF2E7D32)) // Safaricom green
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = "SIM Toolkit - M-PESA",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        letterSpacing = 1.sp
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (processingState == "Input") {
+                        Text(
+                            text = "Do you want to pay Ksh. $formattedCost to SRG EXECS (Business No: 339944) for Booking #SRG-${booking.id}?",
+                            color = Color.Black,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            lineHeight = 18.sp,
+                            textAlign = TextAlign.Start,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        
+                        Spacer(modifier = Modifier.height(14.dp))
+                        
+                        Text(
+                            text = "Enter M-PESA PIN:",
+                            color = Color(0xFF2E7D32),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.align(Alignment.Start)
+                        )
+                        
+                        Spacer(modifier = Modifier.height(6.dp))
+                        
+                        // Masked 4-digit PIN Textfield
+                        OutlinedTextField(
+                            value = pinValue,
+                            onValueChange = { if (it.length <= 4 && it.all { char -> char.isDigit() }) pinValue = it },
+                            placeholder = { Text("PIN", color = Color.Gray, fontSize = 12.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            visualTransformation = PasswordVisualTransformation(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF2E7D32),
+                                unfocusedBorderColor = Color.Gray,
+                                focusedTextColor = Color.Black,
+                                unfocusedTextColor = Color.Black
+                            ),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, letterSpacing = 6.sp, fontWeight = FontWeight.Black),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("mpesa_simulator_pin_input")
+                        )
+                        
+                        Spacer(modifier = Modifier.height(20.dp))
+                        
+                        // Buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(
+                                onClick = { onDismiss() }
+                            ) {
+                                Text("CANCEL", color = Color.DarkGray, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            TextButton(
+                                onClick = {
+                                    if (pinValue.length >= 4) {
+                                        processingState = "Validating"
+                                    }
+                                },
+                                enabled = pinValue.length >= 4
+                            ) {
+                                Text(
+                                    "SEND", 
+                                    color = if (pinValue.length >= 4) Color(0xFF2E7D32) else Color.Gray, 
+                                    fontWeight = FontWeight.Black, 
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    } else if (processingState == "Validating") {
+                        // Simulating Safaricom OTA ping back network latency
+                        Spacer(modifier = Modifier.height(10.dp))
+                        CircularProgressIndicator(
+                            color = Color(0xFF2E7D32),
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Verifying cellular M-PESA wallet PIN with Safaricom network controllers...",
+                            color = Color.DarkGray,
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 16.sp,
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        
+                        // Launch a side effect timer to auto success
+                        LaunchedEffect(Unit) {
+                            kotlinx.coroutines.delay(2200)
+                            processingState = "Success"
+                        }
+                    } else {
+                        // Success state
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF2E7D32),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "PIN Accepted & Verified!",
+                            color = Color.Black,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Text(
+                            text = "Trans ID: QK88${booking.id}Y67 Approved. Secured lease released.",
+                            color = Color.DarkGray,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(
+                            onClick = { onPaymentSuccess() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

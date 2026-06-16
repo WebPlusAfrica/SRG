@@ -358,7 +358,63 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
                 // Perform payment simulation delay
                 delay(1500)
                 
-                // Update booking status
+                if (paymentMethod == "M-Pesa") {
+                    // Update booking status to Pending (STK push sent, awaiting PIN confirm)
+                    val updatedBooking = currentBooking.copy(
+                        paymentStatus = "Pending"
+                    )
+                    repository.updateBookingPayment(bookingId, "Pending")
+                    _activeBookingReceipt.value = updatedBooking
+                    
+                    // Save payment phone number to user's persistent phone profile
+                    val currentProfile = repository.getUserProfileSuspend(currentUserEmail) ?: UserProfile(currentUserEmail)
+                    repository.insertUserProfile(currentProfile.copy(phoneNumber = phoneNumber))
+                    
+                    addNotification(
+                        "M-Pesa STK Dispatched",
+                        "STK push PIN request sent to $phoneNumber for Ksh. ${String.format(Locale.US, "%,.2f", currentBooking.totalSpent)}. Please enter your PIN to authorize payment.",
+                        "payment"
+                    )
+                } else {
+                    // Live Cash handover updates instantly
+                    val updatedBooking = currentBooking.copy(
+                        paymentStatus = "Paid",
+                        status = "Active"
+                    )
+                    repository.updateBookingPayment(bookingId, "Paid")
+                    repository.updateBookingStatus(bookingId, "Active")
+                    repository.updateVehicleStatus(currentBooking.vehicleId, "Rented")
+                    
+                    _activeBookingReceipt.value = updatedBooking
+                    
+                    // Save payment phone number to user's persistent phone profile
+                    val currentProfile = repository.getUserProfileSuspend(currentUserEmail) ?: UserProfile(currentUserEmail)
+                    repository.insertUserProfile(currentProfile.copy(phoneNumber = phoneNumber))
+                    
+                    // Award loyalty points: 1 point for every Ksh 1000 spent
+                    val loyaltyEarned = Math.max(1, (currentBooking.totalSpent / 1000).toInt())
+                    repository.incrementLoyaltyPoints(currentUserEmail, loyaltyEarned, currentBooking.totalSpent)
+                    
+                    addNotification(
+                        "$paymentMethod Processed",
+                        "Cash coordination approved. Fleet agent will contact you shortly on $phoneNumber.",
+                        "payment"
+                    )
+                    addNotification(
+                        "Loyalty Points Credited",
+                        "Earned $loyaltyEarned loyalty points for your booking. Safe driving in Kenya!",
+                        "loyalty"
+                    )
+                }
+            }
+        }
+    }
+
+    // Explicit verification helper when client actually pays (e.g., via simulated PIN prompt or status poll check)
+    fun confirmMpesaPayment(bookingId: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentBooking = _activeBookingReceipt.value
+            if (currentBooking != null && currentBooking.id == bookingId) {
                 val updatedBooking = currentBooking.copy(
                     paymentStatus = "Paid",
                     status = "Active"
@@ -369,17 +425,13 @@ class CarHireViewModel(application: Application) : AndroidViewModel(application)
                 
                 _activeBookingReceipt.value = updatedBooking
                 
-                // Save payment phone number to user's persistent phone profile
-                val currentProfile = repository.getUserProfileSuspend(currentUserEmail) ?: UserProfile(currentUserEmail)
-                repository.insertUserProfile(currentProfile.copy(phoneNumber = phoneNumber))
-                
                 // Award loyalty points: 1 point for every Ksh 1000 spent
                 val loyaltyEarned = Math.max(1, (currentBooking.totalSpent / 1000).toInt())
                 repository.incrementLoyaltyPoints(currentUserEmail, loyaltyEarned, currentBooking.totalSpent)
                 
                 addNotification(
-                    "$paymentMethod Processed",
-                    "Payment of Ksh. ${String.format(Locale.US, "%,.2f", currentBooking.totalSpent)} approved via mobile wallet $phoneNumber. GPS vehicle lock is now active!",
+                    "M-Pesa Payment Confirmed",
+                    "STK Push payment of Ksh. ${String.format(Locale.US, "%,.2f", currentBooking.totalSpent)} verified. Smart GPS remote unlocking is active!",
                     "payment"
                 )
                 addNotification(
